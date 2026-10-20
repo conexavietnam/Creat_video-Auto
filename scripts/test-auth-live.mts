@@ -44,6 +44,10 @@ check('Cookie het han bi chan 401', r.status === 401, String(r.status));
 r = await get('/api/ping', token('1'));
 check('Quan tri vien do id xac nhan (vaid 1) vao duoc 200', r.status === 200, String(r.status));
 
+let burst = 0;
+for (let i = 0; i < 8; i++) if ((await get('/api/ping', token('1'))).status === 200) burst++;
+check('8 request lien tiep cung giay deu 200 (dung chung bo nho dem, id khong bi goi lap)', burst === 8, String(burst));
+
 r = await get('/api/ping', token('2'));
 check('Nguoi khong phai quan tri vien (vaid 2) bi chan 401', r.status === 401, String(r.status));
 check('Bi thu quyen thi cookie bi xoa', /Max-Age=0/.test(r.headers.get('set-cookie') || ''));

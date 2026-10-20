@@ -145,6 +145,12 @@ export function createAuthRouter(): express.Router {
   router.use(
     createVaidEmbedRouter({
       getClient,
+      isAllowed: async vaid => {
+        if (mode() === 'user') return true;
+        const check = await adminCache.check(vaid);
+        if (!check.ok) throw new Error('admin_check_failed');
+        return check.isAdmin === true;
+      },
       allowedOrigins: () => [publicUrl()],
       startSession: ({ vaid, name }) => createToken({ vaid, name }),
       sessionCookie: { name: COOKIE, maxAgeSec: SESSION_TTL_SEC, sameSite: 'Lax', secure: isProduction() },
