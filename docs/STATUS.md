@@ -7,6 +7,7 @@
 ## Chưa làm (pending / queued)
 - W1-A — dispatcher/provider không gửi lại job đang chạy (tránh trả tiền 2 lần) — KHÓ / Sonnet 5.
 - W1-B — kho ảnh nhẹ, chống bấm đúp Studio, xóa file Firebase thừa (phần đăng nhập đã xong) — TRUNG BÌNH.
+- Chặn Veo thật: cả 4 khóa trả 429 `RESOURCE_EXHAUSTED` (dự án Google chưa có hạn mức/thanh toán Veo) — anh bật thanh toán cho từng dự án rồi thử lại; W1-A thêm phân loại lỗi `QUOTA_EXHAUSTED` (phần 4b).
 - Giai đoạn 2: thử 1 prompt thật Veo/Kling — chờ API key và anh đồng ý chi phí.
 - Sao lưu `CREDENTIAL_KEY` và `~/data` ra ngoài VPS — việc của anh.
 - Task Flow (phiên trình duyệt) — chưa làm có chủ đích, không có API chính thức.
