@@ -33,6 +33,9 @@ Prompt dán cho agent:
 > 5. Xóa `firebase-applet-config.json` nếu không có import nào dùng (kiểm tra bằng grep).
 > 6. Kiểm tra: `deploy/smoke-test.sh` chạy với server cục bộ ở cả hai chế độ; thêm vào đó kiểm tra "đăng nhập sai 6 lần → 429". `npm run lint` và `npm run build` qua. Cập nhật `docs/PROGRESS.md`, `docs/STATUS.md`. Mở nhánh riêng, không push `main`.
 
+## Sóng 2
+Khu quản trị `/admin`: xem `docs/plans/active/2026-10-21-admin-console.md` (ADM-A ∥ ADM-B), chạy sau khi Sóng 1 merge.
+
 ## Sau Sóng 1 (không giao agent)
 - Claude review từng nhánh (checkpoint KHÓ), merge, deploy, chạy `smoke-test.sh` có token.
 - **Giai đoạn 2:** thử 1 prompt thật trên Veo hoặc Kling để kiểm chứng provider (mục G). Cần API key và anh đồng ý chi phí.

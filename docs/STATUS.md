@@ -6,6 +6,8 @@
 ## Chưa làm (pending / queued)
 - W1-A — dispatcher/provider không gửi lại job đang chạy (tránh trả tiền 2 lần) — KHÓ / Sonnet 5.
 - W1-B — kho ảnh nhẹ, chống bấm đúp Studio, xóa file Firebase thừa (phần đăng nhập đã xong) — TRUNG BÌNH.
+- ADM-A — backend `/api/admin/*` chỉ cho `SUPERADMIN_VAIDS=1` (info@vaway.vn): cài đặt API Veo/Kling..., thông số, thống kê, nhật ký — KHÓ / Sonnet 5, chạy sau Sóng 1. Xem `docs/plans/active/2026-10-21-admin-console.md`.
+- ADM-B — giao diện `/admin` (4 tab) theo hợp đồng API cố định — TRUNG BÌNH / Haiku 4.5, chạy song song ADM-A (dùng dữ liệu giả).
 - Giai đoạn 2: thử 1 prompt thật Veo/Kling — chờ API key và anh đồng ý chi phí.
 - Sao lưu `CREDENTIAL_KEY` và `~/data` ra ngoài VPS — việc của anh.
 - Task Flow (phiên trình duyệt) — chưa làm có chủ đích, không có API chính thức.
