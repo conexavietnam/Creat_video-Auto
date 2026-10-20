@@ -1,1 +1,21 @@
 @import "tailwindcss";
+
+@layer utilities {
+  .font-oswald {
+    font-family: 'Oswald', sans-serif;
+  }
+  .font-roboto {
+    font-family: 'Roboto', sans-serif;
+  }
+  .dot-grid-bg {
+    background-image: radial-gradient(circle, #cbd5e1 1.5px, transparent 1.5px);
+    background-size: 24px 24px;
+  }
+}
+
+h1, h2, h3, h4, h5, h6, .heading-oswald {
+  font-family: 'Oswald', sans-serif;
+}
+body {
+  font-family: 'Roboto', sans-serif;
+}

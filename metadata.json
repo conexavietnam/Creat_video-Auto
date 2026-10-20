@@ -1,6 +1,6 @@
 {
-  "name": "",
-  "description": "",
+  "name": "Muse Batch Manager",
+  "description": "Tool tạo video AI hàng loạt, tham chiếu nhân vật bằng @tag, chạy đa luồng qua pool tài khoản và Flow Studio kéo thả image-to-video",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
