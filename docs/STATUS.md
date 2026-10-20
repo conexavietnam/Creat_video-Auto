@@ -12,5 +12,5 @@
 
 ## Đã xong (done)
 - 2026-10-20 — Deploy tay lên VPS .48, nginx + SSL, systemd --user cổng 3100, 5 GitHub Secrets. Chi tiết: `deploy/README.md`.
-- 2026-10-21 — Đăng nhập chuyển sang VAWAY ID (app id 979215161807, LOGIN_MODE=admin, admin: vaid 1). Chi tiết: `docs/ARCHITECTURE.md` mục 5.
+- 2026-10-21 — Đăng nhập chuyển sang VAWAY ID (app id 979215161807, LOGIN_MODE=admin, admin: vaid 1), đã deploy; cờ SSO `sso_auto/sso_logout/sso_smooth` bật (probe 120 s/300 s), đã xóa `APP_ACCESS_TOKEN` khỏi `app.env` (bản sao lưu ở `/root/app.env.video.before-vaid-20261021` trên VPS .48). Chờ anh thử đăng nhập thật bằng trình duyệt. Chi tiết: `docs/ARCHITECTURE.md` mục 5.
 - 2026-10-21 — Review nhánh agent, merge vào `main`; smoke test site thật 7/7 đạt (chưa có token). Chi tiết: `docs/REVIEW_2026-10-21.md`.
