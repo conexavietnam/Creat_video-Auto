@@ -21,6 +21,10 @@ const { sql } = await import('drizzle-orm');
 
 export { db };
 
+export async function closeDatabase() {
+  await createPool().end();
+}
+
 export async function resetDatabase() {
   await migrate();
   await db.execute(sql`TRUNCATE video_jobs, accounts, provider_settings, admin_audit_log, studio_cards RESTART IDENTITY`);

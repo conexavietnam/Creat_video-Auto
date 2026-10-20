@@ -34,6 +34,7 @@ export type PollResult =
 export interface HealthResult {
   ok: boolean;
   reason: string;
+  code?: string;
 }
 
 export class ProviderError extends Error {

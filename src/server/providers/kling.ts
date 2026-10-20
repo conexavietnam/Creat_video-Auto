@@ -1,6 +1,8 @@
 import crypto from 'crypto';
 import { ProviderError, VideoProvider } from './types.ts';
 import { effectiveBaseUrl, effectiveModel } from '../providerConfig.ts';
+import { imageSize, nearestAspectRatio } from './imageSize.ts';
+import { redactSecrets } from './redact.ts';
 
 const baseUrl = () => effectiveBaseUrl('kling') as string;
 const model = () => effectiveModel('kling') as string;
@@ -24,12 +26,19 @@ function signToken(credential: string): string {
 }
 
 async function call(credential: string, method: string, path: string, body?: unknown): Promise<any> {
-  const res = await fetch(`${baseUrl()}${path}`, {
-    method,
-    headers: { Authorization: `Bearer ${signToken(credential)}`, 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
+  let res: Response;
+  let text: string;
+  try {
+    res = await fetch(`${baseUrl()}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${signToken(credential)}`, 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    text = await res.text();
+  } catch (err) {
+    if (err instanceof ProviderError) throw err;
+    throw new ProviderError('PROVIDER_ERROR', `Không kết nối được Kling: ${redactSecrets(String((err as any)?.message || err), credential.split(':')).slice(0, 120)}`, true);
+  }
   let json: any = null;
   try {
     json = JSON.parse(text);
@@ -43,7 +52,7 @@ async function call(credential: string, method: string, path: string, body?: unk
     throw new ProviderError('RATE_LIMITED', 'Kling báo vượt giới hạn tốc độ hoặc số tác vụ đồng thời', true);
   }
   if (!res.ok || !json || json.code !== 0) {
-    const detail = json?.message || text.slice(0, 200);
+    const detail = redactSecrets(String(json?.message || text.slice(0, 200)), credential.split(':'));
     const retryable = res.status >= 500;
     throw new ProviderError(retryable ? 'PROVIDER_ERROR' : 'INVALID_REQUEST', `Kling trả lỗi: ${detail}`, retryable);
   }
@@ -67,6 +76,19 @@ export const klingProvider: VideoProvider = {
     if (input.inputImage && input.refImages.length > 0) {
       return 'Kling chỉ nhận một ảnh đầu vào, không dùng đồng thời ảnh đầu khung và ảnh tham chiếu @tag';
     }
+    const image = input.inputImage || input.refImages[0];
+    if (image) {
+      const size = imageSize(image.bytes);
+      if (size) {
+        if (Math.min(size.width, size.height) < 300) {
+          return `Kling yêu cầu ảnh đầu vào tối thiểu 300×300 pixel (ảnh này ${size.width}×${size.height})`;
+        }
+        const nearest = nearestAspectRatio(size, ['16:9', '9:16', '1:1']);
+        if (nearest && nearest !== input.aspectRatio) {
+          return `Kling image-to-video lấy tỉ lệ theo ảnh đầu vào (ảnh này gần ${nearest}, bạn đang chọn ${input.aspectRatio}). Hãy chọn tỉ lệ ${nearest} hoặc dùng ảnh đúng tỉ lệ ${input.aspectRatio}`;
+        }
+      }
+    }
     return null;
   },
   async health(credential) {
@@ -74,7 +96,7 @@ export const klingProvider: VideoProvider = {
       await call(credential, 'GET', '/v1/videos/text2video?pageNum=1&pageSize=1');
       return { ok: true, reason: 'Khóa Kling hợp lệ, kết nối ổn định' };
     } catch (err: any) {
-      return { ok: false, reason: err?.message || 'Không kết nối được Kling' };
+      return { ok: false, reason: err?.message || 'Không kết nối được Kling', code: err instanceof ProviderError ? err.code : 'NETWORK' };
     }
   },
   async submit(credential, input) {

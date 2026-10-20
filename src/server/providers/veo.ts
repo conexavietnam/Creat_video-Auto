@@ -1,27 +1,12 @@
 import { GoogleGenAI, GenerateVideosOperation } from '@google/genai';
 import { ProviderError, VideoProvider, SubmitInput } from './types.ts';
 import { effectiveModel } from '../providerConfig.ts';
+import { toVeoError } from './veoErrors.ts';
 
 const model = () => effectiveModel('veo') as string;
 
 function client(apiKey: string) {
   return new GoogleGenAI({ apiKey });
-}
-
-function toProviderError(err: any): ProviderError {
-  if (err instanceof ProviderError) return err;
-  const status = Number(err?.status ?? err?.code);
-  const message = String(err?.message || err);
-  if (status === 401 || status === 403 || /API key|PERMISSION_DENIED|UNAUTHENTICATED/i.test(message)) {
-    return new ProviderError('AUTH_FAILED', 'API key Gemini không hợp lệ hoặc không có quyền dùng Veo', false);
-  }
-  if (status === 429 || /RESOURCE_EXHAUSTED|quota|rate/i.test(message)) {
-    return new ProviderError('RATE_LIMITED', 'Veo báo vượt giới hạn tốc độ hoặc hạn mức', true);
-  }
-  if (status === 400) {
-    return new ProviderError('INVALID_REQUEST', `Veo từ chối yêu cầu: ${message.slice(0, 200)}`, false);
-  }
-  return new ProviderError('PROVIDER_ERROR', `Lỗi từ Veo: ${message.slice(0, 200)}`, true);
 }
 
 export const veoProvider: VideoProvider = {
@@ -51,8 +36,8 @@ export const veoProvider: VideoProvider = {
       await client(credential).models.get({ model: model() });
       return { ok: true, reason: 'API key hợp lệ, kết nối Gemini API ổn định' };
     } catch (err) {
-      const e = toProviderError(err);
-      return { ok: false, reason: e.message };
+      const e = toVeoError(err, credential);
+      return { ok: false, reason: e.message, code: e.code };
     }
   },
   async submit(credential, input) {
@@ -80,7 +65,7 @@ export const veoProvider: VideoProvider = {
       }
       return { externalId: operation.name };
     } catch (err) {
-      throw toProviderError(err);
+      throw toVeoError(err, credential);
     }
   },
   async poll(credential, externalId) {
@@ -112,9 +97,7 @@ export const veoProvider: VideoProvider = {
       }
       return { state: 'done', video: { url: uri, headers: { 'x-goog-api-key': credential } } };
     } catch (err) {
-      const e = toProviderError(err);
-      if (e.code === 'AUTH_FAILED') throw e;
-      return { state: 'running', stage: 'processing' };
+      throw toVeoError(err, credential);
     }
   },
   async cancel() {},

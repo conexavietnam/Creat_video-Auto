@@ -79,3 +79,23 @@ Chỉ superadmin vào được; thiết kế đã chốt ở `docs/plans/active/
 - **Biểu đồ thống kê** vẽ bằng SVG tự viết (không thêm thư viện), co giãn theo bề rộng khung, cuộn ngang khi khoảng ngày dài.
 - Ảnh chụp từng tab: `docs/screenshots/admin/`.
 
+## 9. Độ tin cậy dispatcher & hai nền tảng thật (W1-A)
+
+### Quy tắc mới của dispatcher (mục tiêu: không gửi lại job mà nền tảng có thể vẫn đang xử lý)
+- **Health check mềm:** chỉ `AUTH_FAILED` hoặc lỗi vĩnh viễn (không giải mã được khóa, nền tảng không còn) mới đưa tài khoản Offline ngay. Lỗi khác (timeout, mạng, 5xx) phải thất bại **liên tiếp 3 lần** mới Offline; trong lúc đó trạng thái giữ nguyên và `healthReason` ghi "lần i/3". Một lần thành công xóa bộ đếm. Bộ đếm nằm trong bộ nhớ. Chỉ khi tài khoản thực sự Offline mới trả job đang chạy về Chờ.
+- **Poll lỗi tạm thời giữ nguyên job:** mạng, 5xx, 429, JSON hỏng đều giữ job `running` và thử lại ở lần poll sau (không đụng `last_progress_at`, nên timeout 15 phút vẫn là chốt chặn cuối). Từ **10 lần lỗi liên tiếp** mới coi là `PROVIDER_ERROR` (retryable). `AUTH_FAILED` khi poll thì tài khoản Offline và job **thất bại** (không gửi lại) kèm cảnh báo "video có thể đã được tạo và tính phí, kiểm tra tại nền tảng trước khi thử lại".
+- **Khôi phục khi khởi động:** job `running` chưa có `external_id` (gửi dở lúc server tắt) được xếp lại ngay, không tính retry (mã `SERVER_RESTART`). Job đã có `external_id` tiếp tục được poll.
+- **Hết hạn mức (`QUOTA_EXHAUSTED`):** job thất bại ngay, không retry; tài khoản vào cooldown 30 phút với `healthReason` bắt đầu bằng "Hết hạn mức: ..." (hiện ở `/admin`); health check tự động giữ nguyên cảnh báo đó, bấm "Kiểm tra" thủ công hoặc thay khóa thì gỡ cooldown. Giới hạn tốc độ tạm thời (`RATE_LIMITED`) chỉ cho tài khoản nghỉ 60 giây và job được thử lại.
+- **Rủi ro còn lại (chưa xử lý được):** Veo và Kling chưa có API hủy trong adapter (`cancel` là no-op). Khi quản trị viên tắt/xóa tài khoản, hoặc khóa bị từ chối lúc gửi (`AUTH_FAILED`), các job đang chạy của tài khoản đó vẫn bị đưa về Chờ và gửi lại sang khóa khác, có thể tính phí hai lần. Lỗi mạng ngay lúc gửi job cũng có thể tạo một thao tác bên nền tảng mà hệ thống không biết.
+
+### Kling
+- `text2video` nhận `aspect_ratio`. `image2video` **không** có tham số này (theo các bản sao tài liệu tham chiếu Kling, chưa mở được trang chính thức từ môi trường phát triển): tỉ lệ lấy theo ảnh đầu vào. Vì vậy `validate()` đọc kích thước ảnh và từ chối khi tỉ lệ người dùng chọn không khớp ảnh ("Kling image-to-video lấy tỉ lệ theo ảnh đầu vào..."), cũng từ chối ảnh dưới 300×300 pixel. Ảnh không đọc được kích thước thì không chặn.
+
+### Veo (Gemini API): điều kiện để tạo được video
+1. **Khóa phải thuộc dự án Google đã bật thanh toán (paid tier).** Gói miễn phí không có hạn mức Veo, gọi sẽ nhận `429 RESOURCE_EXHAUSTED: You exceeded your current quota, please check your plan and billing details`. Gói thuê bao Google AI Pro dùng trong ứng dụng Gemini/Flow là thứ khác với thanh toán của Gemini API. Phải bật thanh toán cho **từng dự án** chứa khóa. Có báo cáo trên diễn đàn Google rằng tài khoản mới bật thanh toán đôi khi vẫn bị giữ hạn mức miễn phí một thời gian.
+2. Tên model dùng cho Veo 3.1: `veo-3.1-generate-preview` (mặc định) hoặc `veo-3.1-fast-generate-preview` (nhanh, rẻ hơn, đặt ở `/admin` ô Model). Veo 3.0 đã được Google đánh dấu ngừng cho Gemini API.
+3. Thông số: `aspectRatio` 16:9 hoặc 9:16; `durationSeconds` 4, 6 hoặc 8; ảnh tham chiếu `@tag` tối đa 3 và chỉ khi 8 giây (và 16:9); ảnh đầu khung và ảnh tham chiếu không dùng đồng thời. Adapter chặn các tổ hợp sai ngay khi thêm vào hàng đợi.
+4. Luồng: gọi tạo video → nhận mã thao tác dài hạn → hỏi trạng thái tới khi `done` → lấy `generatedVideos[0].video.uri` → tải bằng header `x-goog-api-key` (theo chuyển hướng). Hệ thống tải về `.data/videos` ngay khi xong vì liên kết của Google chỉ tạm thời.
+5. Chi phí tính theo giây video, không phụ thuộc video có bị xóa sau đó hay không. Đơn giá khai báo ở `/admin` chỉ để ước tính.
+6. Kiểm chứng: bấm "Kiểm tra" ở `/admin` chỉ chứng minh khóa hợp lệ, **không** chứng minh có hạn mức Veo (lỗi 429 chỉ xuất hiện khi gọi tạo video). Cách chắc chắn duy nhất là thử một prompt ngắn nhất (4 giây).
+

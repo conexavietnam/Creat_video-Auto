@@ -20,6 +20,10 @@ const HEALTH_MS = 60000;
 const HEALTH_TIMEOUT_MS = 15000;
 const RATE_LIMIT_COOLDOWN_MS = 60000;
 const MAX_DOWNLOAD_FAILURES = 3;
+const HEALTH_FAILURE_LIMIT = 3;
+const POLL_ERROR_LIMIT = 10;
+const QUOTA_COOLDOWN_MS = 30 * 60_000;
+const QUOTA_PREFIX = 'Hết hạn mức: ';
 
 let paused = false;
 let ticking = false;
@@ -31,12 +35,15 @@ const submitting = new Set<string>();
 const lastPolled = new Map<string, number>();
 const signatures = new Map<string, string>();
 const downloadFailures = new Map<string, number>();
+const pollErrors = new Map<string, number>();
+const healthFailures = new Map<number, number>();
 
 function forget(jobId: string) {
   submitting.delete(jobId);
   lastPolled.delete(jobId);
   signatures.delete(jobId);
   downloadFailures.delete(jobId);
+  pollErrors.delete(jobId);
 }
 
 export async function getSettings() {
@@ -174,44 +181,83 @@ async function markAccountOffline(accountId: number, reason: string) {
   );
 }
 
-export async function checkAccountHealth(account: AccountRow): Promise<{ ok: boolean; reason: string }> {
-  const provider = getProvider(account.providerId);
-  let result: { ok: boolean; reason: string };
-  if (!provider) {
-    result = { ok: false, reason: 'Nền tảng của tài khoản không còn được hỗ trợ' };
-  } else if (!provider.available) {
-    result = { ok: false, reason: provider.unavailableReason || 'Nền tảng chưa khả dụng' };
-  } else {
-    try {
-      const credential = decryptCredential(account.encryptedCredential);
-      result = await Promise.race([
-        provider.health(credential),
-        new Promise<{ ok: boolean; reason: string }>(resolve =>
-          setTimeout(() => resolve({ ok: false, reason: 'Kiểm tra sức khỏe phiên quá thời gian chờ' }), HEALTH_TIMEOUT_MS),
-        ),
-      ]);
-    } catch {
-      result = { ok: false, reason: 'Không giải mã được credential đã lưu, vui lòng thêm lại tài khoản' };
-    }
-  }
+interface HealthOutcome {
+  ok: boolean;
+  reason: string;
+  code?: string;
+  permanent?: boolean;
+}
 
+async function runProviderHealth(account: AccountRow): Promise<HealthOutcome> {
+  const provider = getProvider(account.providerId);
+  if (!provider) return { ok: false, reason: 'Nền tảng của tài khoản không còn được hỗ trợ', permanent: true };
+  if (!provider.available) return { ok: false, reason: provider.unavailableReason || 'Nền tảng chưa khả dụng', permanent: true };
+  let credential: string;
+  try {
+    credential = decryptCredential(account.encryptedCredential);
+  } catch {
+    return { ok: false, reason: 'Không giải mã được credential đã lưu, vui lòng thêm lại tài khoản', permanent: true };
+  }
+  try {
+    return await Promise.race([
+      provider.health(credential),
+      new Promise<HealthOutcome>(resolve =>
+        setTimeout(() => resolve({ ok: false, reason: 'Kiểm tra sức khỏe phiên quá thời gian chờ', code: 'TIMEOUT' }), HEALTH_TIMEOUT_MS),
+      ),
+    ]);
+  } catch (err: any) {
+    return { ok: false, reason: `Kiểm tra sức khỏe lỗi: ${String(err?.message || err).slice(0, 120)}`, code: 'ERROR' };
+  }
+}
+
+async function takeOffline(account: AccountRow, reason: string) {
   await db
     .update(accounts)
-    .set({
-      lastHealthCheck: new Date(),
-      sessionStatus: result.ok && account.isEnabled ? 'online' : 'offline',
-      healthReason: result.reason,
-    })
+    .set({ lastHealthCheck: new Date(), sessionStatus: 'offline', healthReason: reason })
     .where(eq(accounts.id, account.id));
+  await releaseAccountJobs(
+    account.id,
+    'ACCOUNT_DISCONNECTED',
+    'Tài khoản mất kết nối giữa chừng, job được chuyển về Chờ để gán tài khoản Online khác',
+  );
+}
 
-  if (!result.ok) {
-    await releaseAccountJobs(
-      account.id,
-      'ACCOUNT_DISCONNECTED',
-      'Tài khoản mất kết nối giữa chừng, job được chuyển về Chờ để gán tài khoản Online khác',
-    );
+export async function checkAccountHealth(account: AccountRow, options: { auto?: boolean } = {}): Promise<{ ok: boolean; reason: string }> {
+  const result = await runProviderHealth(account);
+  const hasQuotaWarning = !!account.healthReason?.startsWith(QUOTA_PREFIX) && !!account.cooldownUntil && account.cooldownUntil.getTime() > Date.now();
+
+  if (result.ok) {
+    healthFailures.delete(account.id);
+    const keepWarning = options.auto && hasQuotaWarning;
+    await db
+      .update(accounts)
+      .set({
+        lastHealthCheck: new Date(),
+        sessionStatus: account.isEnabled ? 'online' : 'offline',
+        healthReason: keepWarning ? account.healthReason : result.reason,
+        ...(hasQuotaWarning && !options.auto ? { cooldownUntil: null } : {}),
+      })
+      .where(eq(accounts.id, account.id));
+    return { ok: true, reason: result.reason };
   }
-  return result;
+
+  if (result.permanent || result.code === 'AUTH_FAILED') {
+    healthFailures.delete(account.id);
+    await takeOffline(account, result.reason);
+    return { ok: false, reason: result.reason };
+  }
+
+  const failures = (healthFailures.get(account.id) || 0) + 1;
+  healthFailures.set(account.id, failures);
+  if (failures >= HEALTH_FAILURE_LIMIT) {
+    await takeOffline(account, `${result.reason} (đã thất bại ${failures} lần liên tiếp)`);
+  } else {
+    await db
+      .update(accounts)
+      .set({ lastHealthCheck: new Date(), healthReason: `Kiểm tra lần ${failures}/${HEALTH_FAILURE_LIMIT} không thành công, giữ nguyên trạng thái: ${result.reason}` })
+      .where(eq(accounts.id, account.id));
+  }
+  return { ok: false, reason: result.reason };
 }
 
 async function healthSweep() {
@@ -220,7 +266,7 @@ async function healthSweep() {
   try {
     const list = await db.select().from(accounts).where(eq(accounts.isEnabled, true));
     for (const account of list) {
-      await checkAccountHealth(account);
+      await checkAccountHealth(account, { auto: true });
     }
   } catch (err) {
     console.error('Lỗi health check:', err);
@@ -289,7 +335,41 @@ async function handleProviderError(job: JobRow, account: AccountRow, err: unknow
       .set({ cooldownUntil: new Date(Date.now() + RATE_LIMIT_COOLDOWN_MS) })
       .where(eq(accounts.id, account.id));
   }
+  if (failure.code === 'QUOTA_EXHAUSTED') {
+    await db
+      .update(accounts)
+      .set({ cooldownUntil: new Date(Date.now() + QUOTA_COOLDOWN_MS), healthReason: `${QUOTA_PREFIX}${failure.message}` })
+      .where(eq(accounts.id, account.id));
+  }
   await failOrRetry(job, failure);
+}
+
+async function handlePollError(job: JobRow, account: AccountRow, err: unknown) {
+  if (err instanceof ProviderError && err.code === 'AUTH_FAILED') {
+    await db
+      .update(accounts)
+      .set({ sessionStatus: 'offline', healthReason: err.message, lastHealthCheck: new Date() })
+      .where(eq(accounts.id, account.id));
+    await failOrRetry(job, {
+      code: 'AUTH_FAILED',
+      message: `Khóa bị từ chối khi theo dõi job, video có thể đã được tạo và tính phí ở nền tảng, hãy kiểm tra tại nền tảng trước khi thử lại: ${err.message}`,
+      retryable: false,
+    });
+    return;
+  }
+
+  const count = (pollErrors.get(job.id) || 0) + 1;
+  pollErrors.set(job.id, count);
+  const detail = String((err as any)?.message || err).slice(0, 160);
+  if (count >= POLL_ERROR_LIMIT) {
+    await failOrRetry(job, {
+      code: 'PROVIDER_ERROR',
+      message: `Không theo dõi được job sau ${count} lần hỏi trạng thái liên tiếp đều lỗi: ${detail}`,
+      retryable: true,
+    });
+    return;
+  }
+  console.warn(`Job ${job.id}: lỗi tạm thời khi hỏi trạng thái (lần ${count}/${POLL_ERROR_LIMIT}), giữ nguyên job: ${detail}`);
 }
 
 async function loadImages(job: JobRow): Promise<{ refs: ImageInput[]; input?: ImageInput } | Failure> {
@@ -415,6 +495,7 @@ async function pollJob(job: JobRow, timeoutMinutes: number) {
 
   try {
     const result = await provider.poll(decryptCredential(account.encryptedCredential), job.externalId);
+    pollErrors.delete(job.id);
     if (result.state === 'done') {
       await finishJob(job, result.video);
       return;
@@ -435,7 +516,7 @@ async function pollJob(job: JobRow, timeoutMinutes: number) {
       })
       .where(and(eq(videoJobs.id, job.id), eq(videoJobs.status, 'running')));
   } catch (err) {
-    await handleProviderError(job, account, err);
+    await handlePollError(job, account, err);
   }
 }
 
@@ -513,8 +594,32 @@ async function tick() {
   }
 }
 
+export async function recoverInterruptedJobs() {
+  const recovered = await db
+    .update(videoJobs)
+    .set({
+      status: 'pending',
+      progress: 0,
+      accountId: null,
+      startedAt: null,
+      lastProgressAt: null,
+      elapsedSeconds: 0,
+      errorCode: 'SERVER_RESTART',
+      errorMessage: 'Máy chủ khởi động lại giữa lúc gửi job, job được xếp lại hàng chờ',
+    })
+    .where(and(eq(videoJobs.status, 'running'), sql`${videoJobs.externalId} IS NULL`))
+    .returning({ id: videoJobs.id });
+  if (recovered.length > 0) console.warn(`Đã xếp lại ${recovered.length} job gửi dở khi máy chủ tắt`);
+}
+
 export function startDispatcher() {
   if (tickTimer) return;
+  ticking = true;
+  recoverInterruptedJobs()
+    .catch(err => console.error('Không khôi phục được job gửi dở:', err))
+    .finally(() => {
+      ticking = false;
+    });
   tickTimer = setInterval(tick, TICK_MS);
   healthTimer = setInterval(healthSweep, HEALTH_MS);
   void healthSweep();
@@ -542,4 +647,26 @@ export async function stopAll() {
 export async function cancelJobRemote(job: JobRow) {
   await cancelRemote(job);
   forget(job.id);
+}
+
+export async function tickOnce() {
+  await tick();
+}
+
+export function resetDispatcherState() {
+  paused = false;
+  ticking = false;
+  submitting.clear();
+  lastPolled.clear();
+  signatures.clear();
+  downloadFailures.clear();
+  pollErrors.clear();
+  healthFailures.clear();
+}
+
+export function shutdownDispatcher() {
+  if (tickTimer) clearInterval(tickTimer);
+  if (healthTimer) clearInterval(healthTimer);
+  tickTimer = null;
+  healthTimer = null;
 }

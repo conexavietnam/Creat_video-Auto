@@ -25,6 +25,7 @@ Cập nhật sau đợt rà soát spec v1.0 ↔ code. Cột "Mức xác nhận" 
 | 19 | Định tuyến URL `?view=...` | ĐÃ HOÀN THÀNH | Playwright |
 | 20 | ADM-A: backend `/api/admin/*` (phân quyền `SUPERADMIN_VAIDS`, khóa API, cấu hình provider, thông số, thống kê, nhật ký kiểm toán) | ĐÃ HOÀN THÀNH, CHỜ REVIEW | `npm test` 19 ca (AD-01..08) với Postgres thật + kiểm thử đột biến (làm hỏng có chủ đích 4 chỗ, test bắt được cả 4); chạy tay trên server thật có/không có `SUPERADMIN_VAIDS`. Chưa thêm khóa Veo/Kling thật |
 | 21 | ADM-B: giao diện `/admin` (4 tab Nhà cung cấp, Thông số, Thống kê, Nhật ký) + tab Tài khoản ở app chính chuyển thành chỉ xem + liên kết "Quản trị" chỉ cho superadmin | ĐÃ HOÀN THÀNH, CHỜ REVIEW | Playwright 44 kiểm tra (dữ liệu giả và server thật, người đủ/không đủ quyền, phím ←/→, 4 tab ở 360px không tràn ngang, khóa không hiện lại ở bất kỳ đâu). Ảnh chụp ở `docs/screenshots/admin/`. Chưa thử trên trình duyệt thật với VAWAY ID |
+| 22 | W1-A: dispatcher/provider không gửi lại job đang chạy (health mềm 3 lần, poll lỗi tạm thời giữ job, khôi phục khi khởi động, phân loại lỗi Veo/Kling, kiểm tra tỉ lệ ảnh Kling i2v) | ĐÃ HOÀN THÀNH, CHỜ REVIEW | `npm test` 50 ca (31 ca mới cho W1-A) với Postgres thật + kiểm thử đột biến (làm hỏng 4 chỗ, test bắt được cả 4). Chưa chạy với API Veo/Kling thật |
 
 ## Giới hạn đã biết
 - Chỉ chạy 1 instance server cho mỗi database (trạng thái tạm dừng và poll nằm trong bộ nhớ).
