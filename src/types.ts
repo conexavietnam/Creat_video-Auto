@@ -83,6 +83,8 @@ export interface OverviewState {
   };
   onlineAccounts: number;
   totalAccounts: number;
+  concurrencyLimit?: number;
+  effectiveConcurrency?: number;
   refImageCount: number;
   runningJobs: Array<{
     id: string;

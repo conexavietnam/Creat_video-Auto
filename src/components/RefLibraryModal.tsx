@@ -5,6 +5,7 @@ import { Upload, X, Trash2, Tag, AlertCircle, Check, Image as ImageIcon } from '
 interface RefLibraryProps {
   onClose?: () => void;
   onRefreshState?: () => void;
+  isModal?: boolean;
 }
 
 interface PendingUpload {
@@ -18,7 +19,7 @@ interface PendingUpload {
   error?: string;
 }
 
-export const RefLibraryModal: React.FC<RefLibraryProps> = ({ onClose, onRefreshState }) => {
+export const RefLibraryModal: React.FC<RefLibraryProps> = ({ onClose, onRefreshState, isModal }) => {
   const [images, setImages] = useState<RefImage[]>([]);
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -47,7 +48,6 @@ export const RefLibraryModal: React.FC<RefLibraryProps> = ({ onClose, onRefreshS
 
     setGlobalError(null);
     setSuccessMsg(null);
-    const newPending: PendingUpload[] = [];
 
     Array.from(files).forEach((file) => {
       if (file.size > 8 * 1024 * 1024) {
@@ -170,8 +170,8 @@ export const RefLibraryModal: React.FC<RefLibraryProps> = ({ onClose, onRefreshS
 
   const validCount = pending.filter(p => !p.error && p.tag.length > 0).length;
 
-  return (
-    <div className="bg-white rounded-xl shadow-xs border border-slate-200 p-6 max-w-5xl mx-auto my-6">
+  const content = (
+    <div className={`bg-white rounded-xl shadow-xs border border-slate-200 p-6 max-w-5xl w-full mx-auto ${isModal ? 'max-h-[90vh] overflow-y-auto' : 'my-6'}`}>
       <div className="flex items-center justify-between pb-4 border-b border-slate-200">
         <div>
           <h2 className="text-2xl font-oswald font-bold text-slate-900 flex items-center gap-2">
@@ -195,6 +195,15 @@ export const RefLibraryModal: React.FC<RefLibraryProps> = ({ onClose, onRefreshS
               className="hidden"
             />
           </label>
+
+          {(isModal || onClose) && (
+            <button
+              onClick={onClose}
+              className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -319,4 +328,14 @@ export const RefLibraryModal: React.FC<RefLibraryProps> = ({ onClose, onRefreshS
       </div>
     </div>
   );
+
+  if (isModal) {
+    return (
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-2xs z-50 flex items-center justify-center p-4">
+        {content}
+      </div>
+    );
+  }
+
+  return content;
 };

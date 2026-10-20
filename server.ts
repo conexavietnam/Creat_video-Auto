@@ -162,6 +162,11 @@ app.get('/api/state', async (req, res) => {
 
     const allRefImages = await db.select().from(refImages);
 
+    const settings = await db.select().from(appSettings).where(eq(appSettings.id, 1));
+    const config = settings[0] || { concurrencyLimit: 3, maxRetries: 2, timeoutMinutes: 15 };
+    const onlineSlots = allAccounts.filter(a => a.isEnabled && a.sessionStatus === 'online').reduce((sum, a) => sum + (a.maxSlots || 1), 0);
+    const effectiveConcurrency = Math.min(config.concurrencyLimit, onlineSlots);
+
     res.json({
       success: true,
       data: {
@@ -175,6 +180,8 @@ app.get('/api/state', async (req, res) => {
         },
         onlineAccounts: onlineAccountsCount,
         totalAccounts: allAccounts.length,
+        concurrencyLimit: config.concurrencyLimit,
+        effectiveConcurrency,
         refImageCount: allRefImages.length,
         runningJobs: runningJobs.map(j => ({
           id: j.id,
@@ -362,7 +369,7 @@ app.delete('/api/ref-images/:tag', async (req, res) => {
 
 app.post('/api/queue/enqueue', async (req, res) => {
   try {
-    const { rawText, splitMode, duration, aspectRatio, concurrency } = req.body;
+    const { rawText, splitMode, duration, aspectRatio, concurrency, batchRefTag } = req.body;
     if (!rawText || !rawText.trim()) {
       return res.status(400).json({ success: false, error: 'Văn bản prompt không được rỗng' });
     }
@@ -386,6 +393,12 @@ app.post('/api/queue/enqueue', async (req, res) => {
     for (const promptText of prompts) {
       const matches = promptText.match(/@([a-z0-9-_]+)/gi) || [];
       const extractedTags = matches.map(m => m.substring(1).toLowerCase());
+      if (batchRefTag && batchRefTag.trim()) {
+        const cleanBatchTag = batchRefTag.trim().toLowerCase().replace(/^@/, '');
+        if (!extractedTags.includes(cleanBatchTag)) {
+          extractedTags.push(cleanBatchTag);
+        }
+      }
       const uniqueTags = Array.from(new Set(extractedTags));
 
       const taskId = generateTaskId();
@@ -459,6 +472,10 @@ app.get('/api/queue/jobs', async (req, res) => {
 
 app.post('/api/queue/process', async (req, res) => {
   try {
+    const onlineAccounts = await db.select().from(accounts).where(and(eq(accounts.isEnabled, true), eq(accounts.sessionStatus, 'online')));
+    if (onlineAccounts.length === 0) {
+      return res.status(400).json({ success: false, error: 'Không còn tài khoản Online nào trong pool! Vui lòng bật hoặc thêm tài khoản để chạy hàng đợi.' });
+    }
     isDispatcherRunning = true;
     startDispatcher();
     res.json({ success: true, message: 'Đã khởi động bộ điều phối Dispatcher' });

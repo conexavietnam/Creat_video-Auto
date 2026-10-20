@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { OverviewState } from './types';
+import { OverviewState, RefImage } from './types';
 import { Header } from './components/Header';
+import { PersistentRefLibraryBar } from './components/PersistentRefLibraryBar';
 import { BatchManagerView } from './components/BatchManagerView';
 import { FlowStudioView } from './components/FlowStudioView';
 import { RefLibraryModal } from './components/RefLibraryModal';
@@ -10,6 +11,8 @@ import { ProgressAndLogsView } from './components/ProgressAndLogsView';
 export default function App() {
   const [activeTab, setActiveTab] = useState<'batch' | 'studio' | 'library' | 'accounts' | 'progress'>('batch');
   const [overviewState, setOverviewState] = useState<OverviewState | null>(null);
+  const [refImagesList, setRefImagesList] = useState<RefImage[]>([]);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -26,6 +29,18 @@ export default function App() {
     window.history.pushState({}, '', url.toString());
   };
 
+  const fetchRefImages = async () => {
+    try {
+      const res = await fetch('/api/ref-images');
+      const json = await res.json();
+      if (json.success) {
+        setRefImagesList(json.data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const fetchOverviewState = async () => {
     try {
       const res = await fetch('/api/state');
@@ -40,7 +55,11 @@ export default function App() {
 
   useEffect(() => {
     fetchOverviewState();
-    const interval = setInterval(fetchOverviewState, 2000);
+    fetchRefImages();
+    const interval = setInterval(() => {
+      fetchOverviewState();
+      fetchRefImages();
+    }, 2000);
     return () => clearInterval(interval);
   }, []);
 
@@ -52,23 +71,63 @@ export default function App() {
         state={overviewState}
       />
 
+      <PersistentRefLibraryBar
+        refImages={refImagesList}
+        onOpenUploadModal={() => setIsUploadModalOpen(true)}
+        onRefreshState={() => {
+          fetchRefImages();
+          fetchOverviewState();
+        }}
+      />
+
+      {isUploadModalOpen && (
+        <RefLibraryModal
+          isModal={true}
+          onClose={() => setIsUploadModalOpen(false)}
+          onRefreshState={() => {
+            fetchRefImages();
+            fetchOverviewState();
+          }}
+        />
+      )}
+
       <main className="flex-1">
         {activeTab === 'batch' && (
-          <BatchManagerView onRefreshState={fetchOverviewState} />
+          <BatchManagerView
+            onRefreshState={() => {
+              fetchOverviewState();
+              fetchRefImages();
+            }}
+          />
         )}
 
         {activeTab === 'studio' && (
-          <FlowStudioView onRefreshState={fetchOverviewState} />
+          <FlowStudioView
+            onRefreshState={() => {
+              fetchOverviewState();
+              fetchRefImages();
+            }}
+          />
         )}
 
         {activeTab === 'library' && (
           <div className="py-4">
-            <RefLibraryModal onRefreshState={fetchOverviewState} />
+            <RefLibraryModal
+              onRefreshState={() => {
+                fetchRefImages();
+                fetchOverviewState();
+              }}
+            />
           </div>
         )}
 
         {activeTab === 'accounts' && (
-          <AccountPoolView onRefreshState={fetchOverviewState} />
+          <AccountPoolView
+            onRefreshState={() => {
+              fetchOverviewState();
+              fetchRefImages();
+            }}
+          />
         )}
 
         {activeTab === 'progress' && (

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StudioCard, RefImage } from '../types';
-import { Play, Plus, ZoomIn, ZoomOut, Maximize2, Trash2, Download, Upload, Image as ImageIcon, Sparkles, X } from 'lucide-react';
+import { Play, Plus, ZoomIn, ZoomOut, Maximize2, Trash2, Download, Upload, Image as ImageIcon, Sparkles, X, Settings } from 'lucide-react';
 
 interface FlowStudioProps {
   onRefreshState: () => void;
@@ -16,8 +16,17 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [selectedRefImg, setSelectedRefImg] = useState<string | null>(null);
   const [uploadDataUrl, setUploadDataUrl] = useState<string | null>(null);
+
+  const [activeMentionCardId, setActiveMentionCardId] = useState<number | null>(null);
+  const [cardMentionFilter, setCardMentionFilter] = useState('');
+
+  const [studioDuration, setStudioDuration] = useState<number>(10);
+  const [studioRatio, setStudioRatio] = useState<'9:16' | '16:9' | '1:1'>('9:16');
+
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const fetchCards = async () => {
     try {
@@ -38,6 +47,14 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
     const interval = setInterval(fetchCards, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  const handleWheel = (e: React.WheelEvent) => {
+    if (e.ctrlKey) {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 5 : -5;
+      setZoom(z => Math.max(50, Math.min(150, z + delta)));
+    }
+  };
 
   const handleAddCard = async () => {
     const targetUrl = uploadDataUrl || selectedRefImg;
@@ -67,17 +84,46 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
     }
   };
 
-  const updateCardPrompt = async (id: number, promptText: string) => {
-    setCards(prev => prev.map(c => c.id === id ? { ...c, prompt: promptText } : c));
-    try {
-      await fetch(`/api/studio/cards/${id}`, {
+  const handlePromptChange = (id: number, val: string, e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setCards(prev => prev.map(c => c.id === id ? { ...c, prompt: val } : c));
+
+    const cursorPos = e.target.selectionStart;
+    const textBefore = val.substring(0, cursorPos);
+    const lastAtIdx = textBefore.lastIndexOf('@');
+
+    if (lastAtIdx !== -1 && !/\s/.test(textBefore.substring(lastAtIdx))) {
+      const filterStr = textBefore.substring(lastAtIdx + 1).toLowerCase();
+      setCardMentionFilter(filterStr);
+      setActiveMentionCardId(id);
+    } else {
+      setActiveMentionCardId(null);
+    }
+
+    fetch(`/api/studio/cards/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: val }),
+    }).catch(console.error);
+  };
+
+  const selectCardMention = (cardId: number, tag: string) => {
+    const card = cards.find(c => c.id === cardId);
+    if (!card) return;
+
+    const val = card.prompt;
+    const lastAtIdx = val.lastIndexOf('@');
+    if (lastAtIdx !== -1) {
+      const newPrompt = val.substring(0, lastAtIdx) + `@${tag} `;
+      setCards(prev => prev.map(c => c.id === cardId ? { ...c, prompt: newPrompt } : c));
+
+      fetch(`/api/studio/cards/${cardId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: promptText }),
-      });
-    } catch (err) {
-      console.error(err);
+        body: JSON.stringify({ prompt: newPrompt }),
+      }).catch(console.error);
     }
+
+    setActiveMentionCardId(null);
   };
 
   const handleMouseDown = (cardId: number, e: React.MouseEvent) => {
@@ -143,17 +189,21 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
     setPan({ x: 0, y: 0 });
   };
 
+  const filteredCardMentions = refImages.filter(img => img.tag.includes(cardMentionFilter));
+
   return (
     <div
+      ref={containerRef}
+      onWheel={handleWheel}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      className="relative w-full h-[calc(100vh-4rem)] overflow-hidden dot-grid-bg bg-slate-100 select-none"
+      className="relative w-full h-[calc(100vh-6.5rem)] overflow-hidden dot-grid-bg bg-slate-100 select-none"
     >
       
-      <div className="absolute top-4 left-4 z-20 bg-white/90 backdrop-blur-xs border border-slate-200 rounded-xl px-4 py-2.5 shadow-sm flex items-center gap-4">
+      <div className="absolute top-4 left-4 z-20 bg-white/95 backdrop-blur-xs border border-slate-200 rounded-xl px-4 py-2.5 shadow-sm flex items-center gap-4">
         <div>
           <h1 className="text-lg font-oswald font-bold text-slate-900 tracking-wide">MUSE FLOW STUDIO</h1>
-          <p className="text-2xs font-roboto text-slate-500">Workspace canvas kéo-thả image-to-video tự do</p>
+          <p className="text-2xs font-roboto text-slate-500">Image to video workspace</p>
         </div>
 
         <div className="h-8 w-px bg-slate-200" />
@@ -164,7 +214,7 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
             className="bg-indigo-600 hover:bg-indigo-700 text-white font-oswald text-xs px-3.5 py-2 rounded-lg shadow-2xs transition-colors flex items-center gap-1.5"
           >
             <Plus className="w-4 h-4" />
-            + THÊM THẺ
+            + THÊM ẢNH
           </button>
 
           <button
@@ -174,13 +224,22 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
             <Play className="w-4 h-4 fill-white" />
             ▶ TẠO TẤT CẢ
           </button>
+
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200"
+            title="Cài đặt mặc định Studio"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
-      <div className="absolute bottom-6 right-6 z-20 bg-white/90 backdrop-blur-xs border border-slate-200 rounded-xl p-2 shadow-md flex items-center gap-2 text-xs font-oswald">
+      <div className="absolute bottom-6 right-6 z-20 bg-white/95 backdrop-blur-xs border border-slate-200 rounded-xl p-2 shadow-md flex items-center gap-2 text-xs font-oswald">
         <button
           onClick={() => setZoom(z => Math.max(50, z - 10))}
           className="p-1.5 hover:bg-slate-100 rounded text-slate-700"
+          title="Thu nhỏ"
         >
           <ZoomOut className="w-4 h-4" />
         </button>
@@ -188,6 +247,7 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
         <button
           onClick={() => setZoom(z => Math.min(150, z + 10))}
           className="p-1.5 hover:bg-slate-100 rounded text-slate-700"
+          title="Phóng to (Ctrl + lăn chuột)"
         >
           <ZoomIn className="w-4 h-4" />
         </button>
@@ -220,7 +280,11 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
               className="bg-slate-800 text-white px-3 py-2 cursor-grab active:cursor-grabbing flex items-center justify-between"
             >
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-indigo-400" />
+                <span className={`w-2 h-2 rounded-full ${
+                  card.status === 'completed' ? 'bg-emerald-400' :
+                  card.status === 'generating' ? 'bg-amber-400 animate-ping' :
+                  card.status === 'failed' ? 'bg-red-400' : 'bg-slate-400'
+                }`} />
                 <span className="text-xs font-oswald font-semibold tracking-wide">THẺ IMAGE-TO-VIDEO #{card.id}</span>
               </div>
               <button
@@ -242,16 +306,42 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
                 <span className="absolute bottom-1.5 left-1.5 bg-black/60 text-white text-2xs font-mono px-1.5 py-0.5 rounded">
                   Ảnh nguồn
                 </span>
+                {card.status === 'completed' && (
+                  <span className="absolute top-1.5 right-1.5 bg-emerald-600 text-white text-2xs font-oswald font-bold px-1.5 py-0.5 rounded">
+                    Đã tạo
+                  </span>
+                )}
+                {card.status === 'generating' && (
+                  <span className="absolute top-1.5 right-1.5 bg-amber-600 text-white text-2xs font-oswald font-bold px-1.5 py-0.5 rounded">
+                    Đang tạo
+                  </span>
+                )}
               </div>
 
-              <div>
-                <label className="text-2xs font-roboto text-slate-500 block mb-1">Prompt riêng (hỗ trợ @tag):</label>
+              <div className="relative">
+                <label className="text-2xs font-roboto text-slate-500 block mb-1">Prompt riêng (gõ @ để chọn ảnh):</label>
                 <textarea
                   value={card.prompt}
-                  onChange={(e) => updateCardPrompt(card.id, e.target.value)}
+                  onChange={(e) => handlePromptChange(card.id, e.target.value, e)}
                   rows={2}
                   className="w-full text-xs font-roboto bg-slate-50 border border-slate-300 rounded-lg p-2 focus:ring-1 focus:ring-indigo-500"
                 />
+
+                {activeMentionCardId === card.id && filteredCardMentions.length > 0 && (
+                  <div className="absolute left-0 bottom-full mb-1 z-30 bg-white border border-slate-300 rounded-lg shadow-lg max-h-40 overflow-y-auto w-full p-1">
+                    <div className="text-2xs font-oswald text-slate-400 px-2 py-0.5 uppercase">CHỌN ẢNH (@tag)</div>
+                    {filteredCardMentions.map(img => (
+                      <button
+                        key={img.id}
+                        onClick={() => selectCardMention(card.id, img.tag)}
+                        className="w-full text-left px-2 py-1 hover:bg-indigo-50 rounded flex items-center gap-2 text-xs font-mono transition-colors"
+                      >
+                        <img src={img.dataUrl} alt={img.tag} className="w-5 h-5 object-cover rounded border" />
+                        <span className="text-indigo-600 font-semibold truncate">@{img.tag}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {card.videoUrl ? (
@@ -266,7 +356,7 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
                     className="w-full aspect-video object-contain rounded bg-black mb-2"
                   />
                   <a
-                    href={jobDownloadUrl(card.videoUrl)}
+                    href={card.videoUrl}
                     download={`studio_card_${card.id}.mp4`}
                     target="_blank"
                     rel="noreferrer"
@@ -283,8 +373,10 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
                       <Sparkles className="w-3.5 h-3.5 animate-spin" />
                       Đang xử lý tạo video...
                     </span>
+                  ) : card.status === 'failed' ? (
+                    <span className="text-red-600 font-medium">Lỗi khi tạo video</span>
                   ) : (
-                    <span>Sẵn sàng tạo video từ thẻ này</span>
+                    <span>Chưa tạo · Sẵn sàng</span>
                   )}
                 </div>
               )}
@@ -363,10 +455,59 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
         </div>
       )}
 
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-2xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-slate-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <h3 className="text-base font-oswald font-bold text-slate-900 flex items-center gap-2">
+                <Settings className="w-4 h-4 text-indigo-600" />
+                CÀI ĐẶT STUDIO
+              </h3>
+              <button onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <div>
+                <label className="text-xs font-roboto text-slate-600 block mb-1">Thời lượng mặc định:</label>
+                <select
+                  value={studioDuration}
+                  onChange={(e) => setStudioDuration(parseInt(e.target.value))}
+                  className="w-full text-xs font-roboto bg-slate-50 border border-slate-300 rounded-lg p-2"
+                >
+                  <option value={5}>5 giây</option>
+                  <option value={10}>10 giây</option>
+                  <option value={15}>15 giây</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-roboto text-slate-600 block mb-1">Tỉ lệ khung hình:</label>
+                <select
+                  value={studioRatio}
+                  onChange={(e) => setStudioRatio(e.target.value as any)}
+                  className="w-full text-xs font-roboto bg-slate-50 border border-slate-300 rounded-lg p-2"
+                >
+                  <option value="9:16">9:16 · Dọc</option>
+                  <option value="16:9">16:9 · Ngang</option>
+                  <option value="1:1">1:1 · Vuông</option>
+                </select>
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex justify-end">
+                <button
+                  onClick={() => setShowSettingsModal(false)}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-oswald text-xs px-4 py-2 rounded-lg"
+                >
+                  ĐÓNG
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
-
-function jobDownloadUrl(url: string): string {
-  return url || '#';
-}

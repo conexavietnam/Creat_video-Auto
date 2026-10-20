@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { VideoJob, RefImage, AppSettings } from '../types';
-import { Play, Square, Plus, Trash2, Search, Download, ChevronLeft, ChevronRight, AlertTriangle, CheckCircle, Clock, AlertCircle, RefreshCw, X, FileText, Settings, Sparkles } from 'lucide-react';
+import { Play, Square, Plus, Trash2, Search, Download, ChevronLeft, ChevronRight, AlertTriangle, CheckCircle, Clock, AlertCircle, RefreshCw, X, FileText, Settings, Sparkles, Layers } from 'lucide-react';
 
 interface BatchManagerProps {
   onRefreshState: () => void;
@@ -15,6 +15,7 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
   const [aspectRatio, setAspectRatio] = useState<'9:16' | '16:9' | '1:1'>('9:16');
   const [concurrency, setConcurrency] = useState<number>(3);
   const [autoPasteEnqueue, setAutoPasteEnqueue] = useState<boolean>(true);
+  const [batchRefTag, setBatchRefTag] = useState<string>('');
 
   const [refImagesList, setRefImagesList] = useState<RefImage[]>([]);
   const [detectedTags, setDetectedTags] = useState<string[]>([]);
@@ -35,6 +36,10 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
   const [totalPages, setTotalPages] = useState(1);
   const [totalJobCount, setTotalJobCount] = useState(0);
   const [counts, setCounts] = useState({ all: 0, pending: 0, running: 0, completed: 0, failed: 0, stopped: 0 });
+
+  const [effectiveConcurrency, setEffectiveConcurrency] = useState<number>(3);
+  const [concurrencyLimit, setConcurrencyLimit] = useState<number>(3);
+  const [onlineAccountsCount, setOnlineAccountsCount] = useState<number>(0);
 
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const [activePlayingJobId, setActivePlayingJobId] = useState<string | null>(null);
@@ -88,6 +93,9 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
       if (stateJson.success) {
         setCounts(stateJson.data.counts);
         setRunningStripJobs(stateJson.data.runningJobs || []);
+        setEffectiveConcurrency(stateJson.data.effectiveConcurrency || 1);
+        setConcurrencyLimit(stateJson.data.concurrencyLimit || 3);
+        setOnlineAccountsCount(stateJson.data.onlineAccounts || 0);
       }
     } catch (err) {
       console.error(err);
@@ -199,6 +207,7 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
           duration,
           aspectRatio,
           concurrency,
+          batchRefTag: batchRefTag || undefined,
         }),
       });
 
@@ -240,12 +249,22 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
   };
 
   const handleStartQueue = async () => {
+    if (onlineAccountsCount === 0) {
+      setToastMsg('Không còn tài khoản Online nào trong pool! Vui lòng bật hoặc thêm tài khoản để chạy hàng đợi.');
+      return;
+    }
+
     try {
-      await fetch('/api/queue/process', { method: 'POST' });
+      const res = await fetch('/api/queue/process', { method: 'POST' });
+      const json = await res.json();
+      if (!json.success) {
+        setToastMsg(json.error || 'Lỗi khi khởi động dispatcher');
+        return;
+      }
       fetchJobs();
       onRefreshState();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setToastMsg(err.message || 'Lỗi kết nối máy chủ');
     }
   };
 
@@ -436,7 +455,21 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
                 </div>
               </div>
 
-              <div className="flex items-center justify-between gap-3">
+              <div>
+                <label className="text-2xs font-roboto text-slate-600 block mb-1">Ảnh dùng chung cho batch (tùy chọn):</label>
+                <select
+                  value={batchRefTag}
+                  onChange={(e) => setBatchRefTag(e.target.value)}
+                  className="w-full text-xs font-roboto bg-slate-50 border border-slate-300 rounded-md px-2.5 py-1.5 font-mono"
+                >
+                  <option value="">(Không dùng chung - chỉ dùng @tag trong prompt)</option>
+                  {refImagesList.map(img => (
+                    <option key={img.id} value={img.tag}>@{img.tag} — {img.filename}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <span className="text-2xs font-roboto text-slate-600">Luồng / tài khoản:</span>
                   <input
@@ -445,7 +478,7 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
                     max={10}
                     value={concurrency}
                     onChange={(e) => setConcurrency(parseInt(e.target.value) || 1)}
-                    className="w-16 text-xs font-mono bg-slate-50 border border-slate-300 rounded-md px-2 py-1 text-center"
+                    className="w-14 text-xs font-mono bg-slate-50 border border-slate-300 rounded-md px-2 py-1 text-center"
                   />
                   <button
                     onClick={applyConcurrency}
@@ -453,6 +486,11 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
                   >
                     Áp dụng
                   </button>
+                  {effectiveConcurrency !== concurrencyLimit && (
+                    <span className="text-2xs font-roboto text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                      Hiệu dụng: {effectiveConcurrency} (Cấu hình: {concurrencyLimit})
+                    </span>
+                  )}
                 </div>
 
                 <label className="flex items-center gap-2 cursor-pointer text-2xs font-roboto text-slate-700">
