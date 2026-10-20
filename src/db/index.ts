@@ -2,6 +2,8 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import * as schema from './schema.ts';
 
+process.env.TZ = 'UTC';
+
 declare global {
   var _postgresPool: Pool | undefined;
 }
@@ -14,6 +16,7 @@ export const createPool = () => {
       password: process.env.SQL_PASSWORD || '',
       database: process.env.SQL_DB_NAME || 'postgres',
       max: 10,
+      options: '-c timezone=UTC',
       connectionTimeoutMillis: 15000,
     });
 
