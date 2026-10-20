@@ -44,6 +44,13 @@ Repo → Settings → Secrets and variables → Actions:
 - Các nhánh khác và PR chỉ chạy **CI** (`tsc` + build).
 - Workflow tự kiểm tra `https://video.vaway.vn/api/auth/status`; nếu app không lên, script trên VPS tự quay về bản trước.
 
+## Kiểm tra nhanh sau deploy
+```bash
+bash deploy/smoke-test.sh https://video.vaway.vn
+APP_ACCESS_TOKEN=<mã> bash deploy/smoke-test.sh https://video.vaway.vn   # kiểm tra thêm phần sau đăng nhập
+```
+Chỉ gửi request đọc, không tạo hay xóa dữ liệu. Trả mã thoát khác 0 nếu có mục lỗi.
+
 ## Vận hành (đăng nhập bằng user ứng dụng)
 ```bash
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
