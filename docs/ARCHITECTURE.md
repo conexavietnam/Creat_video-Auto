@@ -58,7 +58,7 @@ Health check chạy mỗi 60 giây cho mọi tài khoản enabled và ngay khi t
 - Server tự kiểm tra ảnh upload bằng magic bytes và dung lượng thực.
 
 ## 6. Định tuyến URL
-`?view=batch|studio|accounts|library|progress`.
+`?view=batch|studio|accounts|library|progress`. Khu quản trị dùng đường dẫn thật `/admin` (`?tab=providers|settings|stats|audit`).
 
 ## 7. Khu quản trị `/admin` (ADM-A, backend)
 Chỉ superadmin vào được; thiết kế đã chốt ở `docs/plans/active/2026-10-21-admin-console.md`.
@@ -70,4 +70,12 @@ Chỉ superadmin vào được; thiết kế đã chốt ở `docs/plans/active/
 - **Cấu hình provider ở DB** (`provider_settings`, `src/server/providerConfig.ts`): `enabled`, `model`, `base_url`, đơn giá, ghi chú; nạp vào bộ nhớ khi khởi động, làm mới ngay sau mỗi lần `PUT` và 10 giây một lần. Veo dùng `model`; Kling dùng `model` và `base_url`; chưa có hàng thì dùng env. `enabled=false` được cài ở `src/server/providers/index.ts` (thuộc tính `available` của mọi provider tự phản ánh công tắc), nên `resolveProvider`, dispatcher, thêm tài khoản đều thấy mà không phải sửa. Job đang chạy của provider vừa bị tắt vẫn được poll tiếp, job chờ thì nằm yên cho tới khi bật lại.
 - **Thống kê** (`src/server/adminStats.ts`): SQL gộp, ngày theo `Asia/Ho_Chi_Minh` (giả định cột `timestamp` lưu giờ UTC, đúng khi máy chủ và Postgres đặt múi giờ UTC). `totals`, `perProvider`, `perAccount`, `topErrors`, `retries` tính trên job **tạo** trong khoảng ngày, theo trạng thái hiện tại; `perDay.completed/failed` tính theo ngày **kết thúc**. `queue` là toàn thời gian. Thời gian hoàn thành lấy từ lần chạy cuối của job (retry đặt lại `started_at`). `perAccount` chỉ có job còn giữ `account_id` (job xếp lại hàng chờ bị xóa liên kết). Chi phí chỉ là ước tính `giây video × đơn giá`.
 - **Kiểm thử:** `npm test` (`node --test`, thư mục `tests/`) cần một Postgres riêng với `SQL_DB_NAME` kết thúc bằng `_test` (bộ test xóa dữ liệu bảng, từ chối chạy nếu tên khác). CI dựng sẵn Postgres cho việc này.
+
+## 8. Giao diện `/admin` (ADM-B)
+- **Mã nguồn:** `src/admin/` (`AdminApp.tsx` khung + 4 tab `ProvidersTab`, `SettingsTab`, `StatsTab`, `AuditTab`; `adminApi.ts` lớp gọi API; `types.ts` kiểu theo hợp đồng; `mock.ts` dữ liệu giả). `App.tsx` chỉ thêm một nhánh: `pathname === '/admin'` thì dựng `AdminApp` (sau cổng đăng nhập, không tải `/api/state` và kho ảnh).
+- **Quyền:** giao diện không tự quyết. `AdminApp` gọi `GET /api/admin/me`; 404 thì hiện trang "Không tìm thấy trang" (không gợi ý có khu admin). Header app chính chỉ hiện liên kết "Quản trị" khi `/api/admin/me` thành công; tab Tài khoản ở app chính là chỉ xem (bật/tắt, kiểm tra sức khỏe) và chỉ superadmin thấy lối sang `/admin`.
+- **Dữ liệu giả:** `/admin?mock=1` (mọi thao tác chạy trong bộ nhớ) và `/admin?mock=denied` (giả lập 404). Chỉ hoạt động khi `import.meta.env.DEV`; bản production không chứa mã dữ liệu giả.
+- **Khóa:** ô nhập là `type=password`, xóa sạch ngay khi gửi, không lưu ở state lâu hơn lúc gửi hay ở `localStorage`/`sessionStorage`, không hiện lại sau khi lưu. Xóa khóa có hộp xác nhận.
+- **Biểu đồ thống kê** vẽ bằng SVG tự viết (không thêm thư viện), co giãn theo bề rộng khung, cuộn ngang khi khoảng ngày dài.
+- Ảnh chụp từng tab: `docs/screenshots/admin/`.
 

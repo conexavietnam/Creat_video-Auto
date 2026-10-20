@@ -1,16 +1,17 @@
 import React from 'react';
 import { OverviewState } from '../types';
-import { Layers, Workflow, Image as ImageIcon, Users, CheckSquare, Play, Clock, CheckCircle2, Wifi, LogOut } from 'lucide-react';
+import { Layers, Workflow, Image as ImageIcon, Users, CheckSquare, Play, Clock, CheckCircle2, Wifi, LogOut, ShieldCheck } from 'lucide-react';
 
 interface HeaderProps {
   activeTab: 'batch' | 'studio' | 'library' | 'accounts' | 'progress';
   setActiveTab: (tab: 'batch' | 'studio' | 'library' | 'accounts' | 'progress') => void;
   state: OverviewState | null;
   userName?: string;
+  showAdminLink?: boolean;
   onLogout?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, state, userName, onLogout }) => {
+export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, state, userName, showAdminLink, onLogout }) => {
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16 gap-4">
@@ -93,6 +94,16 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, state, 
             <CheckSquare className="w-4 h-4" />
             Tiến Độ
           </button>
+
+          {showAdminLink && (
+            <a
+              href="/admin"
+              className="flex items-center gap-2 px-3 py-2 text-sm font-oswald tracking-wide font-medium rounded-md transition-colors whitespace-nowrap text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              Quản trị
+            </a>
+          )}
         </nav>
 
         <div className="hidden lg:flex items-center gap-3 shrink-0 text-xs font-roboto">

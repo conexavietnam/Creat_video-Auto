@@ -9,6 +9,10 @@ import { AccountPoolView } from './components/AccountPoolView';
 import { ProgressAndLogsView } from './components/ProgressAndLogsView';
 import { LoginView } from './components/LoginView';
 import { AuthInfo, consumeAuthHash, loadAuthStatus, loadVaidLoader, logout } from './api';
+import { AdminApp } from './admin/AdminApp';
+import { adminApi } from './admin/adminApi';
+
+const isAdminPath = () => window.location.pathname.replace(/\/+$/, '') === '/admin';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'batch' | 'studio' | 'library' | 'accounts' | 'progress'>('batch');
@@ -18,6 +22,7 @@ export default function App() {
   const [authState, setAuthState] = useState<'checking' | 'required' | 'ok'>('checking');
   const [authInfo, setAuthInfo] = useState<AuthInfo | null>(null);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   const checkAuth = useCallback(async () => {
     try {
@@ -38,6 +43,17 @@ export default function App() {
   useEffect(() => {
     if (authState === 'ok' && authInfo?.authenticated && authInfo.vaid) loadVaidLoader(authInfo.vaid.loaderUrl);
   }, [authState, authInfo]);
+
+  useEffect(() => {
+    const onUnauthorized = () => setAuthState('required');
+    window.addEventListener('muse:unauthorized', onUnauthorized);
+    return () => window.removeEventListener('muse:unauthorized', onUnauthorized);
+  }, []);
+
+  useEffect(() => {
+    if (authState !== 'ok' || isAdminPath()) return;
+    adminApi.me().then(result => setIsSuperAdmin(result.ok));
+  }, [authState]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -87,7 +103,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (authState !== 'ok') return;
+    if (authState !== 'ok' || isAdminPath()) return;
     fetchOverviewState();
     fetchRefImages();
     const stateInterval = setInterval(fetchOverviewState, 2000);
@@ -100,6 +116,7 @@ export default function App() {
 
   if (authState === 'checking') return null;
   if (authState === 'required') return <LoginView auth={authInfo} notice={authNotice} onLoggedIn={checkAuth} />;
+  if (isAdminPath()) return <AdminApp userName={authInfo?.user?.name} onLogout={authInfo?.required ? logout : undefined} />;
 
   return (
     <div className="min-h-screen bg-slate-50 font-roboto text-slate-900 flex flex-col">
@@ -108,6 +125,7 @@ export default function App() {
         setActiveTab={handleTabChange}
         state={overviewState}
         userName={authInfo?.user?.name}
+        showAdminLink={isSuperAdmin}
         onLogout={authInfo?.required ? logout : undefined}
       />
 
@@ -165,6 +183,7 @@ export default function App() {
 
         {activeTab === 'accounts' && (
           <AccountPoolView
+            isSuperAdmin={isSuperAdmin}
             onRefreshState={() => {
               fetchOverviewState();
               fetchRefImages();
