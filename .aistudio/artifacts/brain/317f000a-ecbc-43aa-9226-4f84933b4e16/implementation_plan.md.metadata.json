@@ -1,0 +1,6 @@
+{
+  "summary": "Kế hoạch chi tiết triển khai Muse Batch Manager theo tài liệu đặc tả v1.0 và các yêu cầu kỹ thuật của người dùng: Kiến trúc PostgreSQL (Drizzle ORM), Account Pool đa session, Kho ảnh tham chiếu (@tag mention), Hàng đợi Dispatcher FIFO đa luồng cuốn chiếu, Dải theo dõi trực tiếp, Flow Studio kéo thả trên canvas dot-grid, bảo mật mã hóa credentials, font Oswald cho tiêu đề và Roboto cho nội dung, URL định tuyến riêng cho từng tính năng, và bảng theo dõi tiến độ công việc.",
+  "updatedAt": "2026-10-20T05:55:58.016098614Z",
+  "requestFeedback": true,
+  "userFacing": true
+}
