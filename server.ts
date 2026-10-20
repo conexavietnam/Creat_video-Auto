@@ -2,20 +2,21 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { db } from './src/db/index.ts';
-import { accounts, refImages, videoJobs, studioCards, appSettings, projectProgress } from './src/db/schema.ts';
+import { accounts, refImages, videoJobs, studioCards, projectProgress } from './src/db/schema.ts';
 import { eq, desc, sql, like, or, and, ilike, getTableColumns } from 'drizzle-orm';
 import { migrate } from './src/server/migrate.ts';
-import { encryptCredential, maskIdentifier } from './src/server/crypto.ts';
-import { assertAuthConfigured, createAuthRouter, requireAuth } from './src/server/auth.ts';
+import { assertAuthConfigured, createAuthRouter, currentUser, requireAuth, requireSuperAdmin, warnIfNoSuperAdmin } from './src/server/auth.ts';
+import { createAdminRouter } from './src/server/admin.ts';
+import { createAccountsRouter } from './src/server/accountRoutes.ts';
+import { refreshProviderConfigs, startProviderConfigRefresh } from './src/server/providerConfig.ts';
+import { applySettingsPatch, validateSettingsPatch } from './src/server/settingsOps.ts';
 import { decodeImage, extractTags, MAX_IMAGE_BYTES, normalizeTag } from './src/server/images.ts';
 import { VIDEO_DIR, removeVideoFiles } from './src/server/storage.ts';
-import { getProvider, listProviders, publicProvider } from './src/server/providers/index.ts';
+import { listProviders, publicProvider } from './src/server/providers/index.ts';
 import { checkCapabilities, generateTaskId, resolveProvider, resolveTags, splitPrompts } from './src/server/jobs.ts';
 import {
   cancelJobRemote,
-  checkAccountHealth,
   computeEffectiveConcurrency,
-  disableAccountJobs,
   getSettings,
   isAccountSchedulable,
   isDispatcherActive,
@@ -30,9 +31,6 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const DURATIONS = [4, 5, 6, 8, 10, 15];
-const RATIOS = ['9:16', '16:9', '1:1'];
-
 assertAuthConfigured();
 app.set('trust proxy', 'loopback');
 app.use(createAuthRouter());
@@ -41,12 +39,6 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 const { inputImageUrl: _omitInput, ...jobColumns } = getTableColumns(videoJobs);
-
-function publicAccount(a: typeof accounts.$inferSelect) {
-  const { encryptedCredential: _secret, ...rest } = a;
-  const provider = getProvider(a.providerId);
-  return { ...rest, providerLabel: provider?.label || a.providerId };
-}
 
 function fail(res: express.Response, err: any) {
   console.error(err);
@@ -114,118 +106,8 @@ app.get('/api/state', async (_req, res) => {
   }
 });
 
-app.get('/api/accounts', async (_req, res) => {
-  try {
-    const list = await db.select().from(accounts).orderBy(desc(accounts.id));
-    res.json({ success: true, data: list.map(publicAccount) });
-  } catch (err) {
-    fail(res, err);
-  }
-});
-
-app.post('/api/accounts', async (req, res) => {
-  try {
-    const { name, credential, providerId, maxSlots } = req.body;
-    if (!name || !credential) {
-      return res.status(400).json({ success: false, error: 'Thiếu tên hoặc thông tin credential' });
-    }
-    const provider = getProvider(providerId || 'mock');
-    if (!provider) {
-      return res.status(400).json({ success: false, error: 'Nền tảng không tồn tại' });
-    }
-    if (!provider.available) {
-      return res.status(400).json({ success: false, error: `Nền tảng ${provider.label} chưa khả dụng: ${provider.unavailableReason}` });
-    }
-    const slots = Number.isInteger(maxSlots) && maxSlots >= 1 && maxSlots <= 20 ? maxSlots : 1;
-
-    const inserted = await db
-      .insert(accounts)
-      .values({
-        name: String(name).slice(0, 80),
-        maskedIdentifier: maskIdentifier(String(credential)),
-        encryptedCredential: encryptCredential(String(credential)),
-        providerId: provider.id,
-        isEnabled: true,
-        sessionStatus: 'offline',
-        maxSlots: slots,
-        healthReason: 'Đang kiểm tra phiên đăng nhập',
-      })
-      .returning();
-
-    await checkAccountHealth(inserted[0]);
-    const fresh = await db.select().from(accounts).where(eq(accounts.id, inserted[0].id));
-    res.json({ success: true, data: publicAccount(fresh[0]) });
-  } catch (err) {
-    fail(res, err);
-  }
-});
-
-app.patch('/api/accounts/:id', async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const { maxSlots, name } = req.body;
-    const patch: Partial<typeof accounts.$inferInsert> = {};
-    if (maxSlots !== undefined) {
-      if (!Number.isInteger(maxSlots) || maxSlots < 1 || maxSlots > 20) {
-        return res.status(400).json({ success: false, error: 'Số slot phải là số nguyên từ 1 đến 20' });
-      }
-      patch.maxSlots = maxSlots;
-    }
-    if (name !== undefined) patch.name = String(name).slice(0, 80);
-    const updated = await db.update(accounts).set(patch).where(eq(accounts.id, id)).returning();
-    if (!updated[0]) return res.status(404).json({ success: false, error: 'Không tìm thấy tài khoản' });
-    res.json({ success: true, data: publicAccount(updated[0]) });
-  } catch (err) {
-    fail(res, err);
-  }
-});
-
-app.patch('/api/accounts/:id/enable', async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const enabled = !!req.body.isEnabled;
-    const updated = await db
-      .update(accounts)
-      .set({ isEnabled: enabled, sessionStatus: 'offline', healthReason: enabled ? 'Đang kiểm tra phiên đăng nhập' : 'Tài khoản đã bị tắt' })
-      .where(eq(accounts.id, id))
-      .returning();
-    if (!updated[0]) return res.status(404).json({ success: false, error: 'Không tìm thấy tài khoản' });
-
-    if (enabled) {
-      await checkAccountHealth(updated[0]);
-    } else {
-      await disableAccountJobs(id, 'ACCOUNT_DISCONNECTED', 'Tài khoản bị tắt giữa chừng, job được chuyển về Chờ để gán tài khoản Online khác');
-    }
-    const fresh = await db.select().from(accounts).where(eq(accounts.id, id));
-    res.json({ success: true, data: publicAccount(fresh[0]) });
-  } catch (err) {
-    fail(res, err);
-  }
-});
-
-app.delete('/api/accounts/:id', async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    await disableAccountJobs(id, 'ACCOUNT_REMOVED', 'Tài khoản bị xóa khỏi pool, job được chuyển về Chờ để gán tài khoản khác');
-    await db.delete(accounts).where(eq(accounts.id, id));
-    res.json({ success: true, message: 'Đã xóa tài khoản, credential đã mã hóa và hủy session' });
-  } catch (err) {
-    fail(res, err);
-  }
-});
-
-app.post('/api/accounts/:id/health', async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const found = await db.select().from(accounts).where(eq(accounts.id, id));
-    if (!found[0]) return res.status(404).json({ success: false, error: 'Không tìm thấy tài khoản' });
-    await checkAccountHealth(found[0]);
-    const fresh = await db.select().from(accounts).where(eq(accounts.id, id));
-    res.json({ success: true, data: publicAccount(fresh[0]) });
-  } catch (err) {
-    fail(res, err);
-  }
-});
+app.use('/api/accounts', createAccountsRouter());
+app.use('/api/admin', requireSuperAdmin, createAdminRouter());
 
 app.get('/api/ref-images', async (_req, res) => {
   try {
@@ -613,38 +495,9 @@ app.get('/api/settings', async (_req, res) => {
 
 app.put('/api/settings', async (req, res) => {
   try {
-    const body = req.body || {};
-    const patch: Partial<typeof appSettings.$inferInsert> = { updatedAt: new Date() };
-    const int = (value: unknown, min: number, max: number, label: string) => {
-      if (!Number.isInteger(value) || (value as number) < min || (value as number) > max) {
-        throw new Error(`${label} phải là số nguyên từ ${min} đến ${max}`);
-      }
-      return value as number;
-    };
-
-    try {
-      if (body.concurrencyLimit !== undefined) patch.concurrencyLimit = int(body.concurrencyLimit, 1, 50, 'Số luồng');
-      if (body.maxRetries !== undefined) patch.maxRetries = int(body.maxRetries, 0, 10, 'Số lần retry');
-      if (body.timeoutMinutes !== undefined) patch.timeoutMinutes = int(body.timeoutMinutes, 1, 240, 'Thời gian timeout');
-      if (body.defaultDuration !== undefined) {
-        if (!DURATIONS.includes(body.defaultDuration)) throw new Error('Thời lượng mặc định không hợp lệ');
-        patch.defaultDuration = body.defaultDuration;
-      }
-      if (body.defaultAspectRatio !== undefined) {
-        if (!RATIOS.includes(body.defaultAspectRatio)) throw new Error('Tỉ lệ mặc định không hợp lệ');
-        patch.defaultAspectRatio = body.defaultAspectRatio;
-      }
-      if (body.defaultProviderId !== undefined) {
-        if (body.defaultProviderId !== 'auto' && !getProvider(body.defaultProviderId)) throw new Error('Nền tảng mặc định không tồn tại');
-        patch.defaultProviderId = body.defaultProviderId;
-      }
-      if (body.autoEnqueueOnPaste !== undefined) patch.autoEnqueueOnPaste = !!body.autoEnqueueOnPaste;
-    } catch (validation: any) {
-      return res.status(400).json({ success: false, error: validation.message });
-    }
-
-    const updated = await db.update(appSettings).set(patch).where(eq(appSettings.id, 1)).returning();
-    res.json({ success: true, data: updated[0] });
+    const checked = validateSettingsPatch(req.body);
+    if (!checked.ok) return res.status(400).json({ success: false, error: checked.error });
+    res.json({ success: true, data: await applySettingsPatch(checked.patch) });
   } catch (err) {
     fail(res, err);
   }
@@ -703,6 +556,9 @@ app.delete('/api/progress/:id', async (req, res) => {
 });
 
 await migrate();
+await refreshProviderConfigs();
+startProviderConfigRefresh();
+warnIfNoSuperAdmin();
 startDispatcher();
 
 if (process.env.NODE_ENV !== 'production') {

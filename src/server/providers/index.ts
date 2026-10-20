@@ -3,8 +3,25 @@ import { mockProvider } from './mock.ts';
 import { veoProvider } from './veo.ts';
 import { klingProvider } from './kling.ts';
 import { flowProvider } from './flow.ts';
+import { isProviderEnabled } from '../providerConfig.ts';
 
-const registry: VideoProvider[] = [veoProvider, klingProvider, flowProvider, mockProvider];
+const ADMIN_DISABLED_REASON = 'Đã bị quản trị viên tắt';
+
+function withAdminSwitch(provider: VideoProvider): VideoProvider {
+  const baseAvailable = provider.available;
+  const baseReason = provider.unavailableReason;
+  Object.defineProperty(provider, 'available', {
+    get: () => baseAvailable && isProviderEnabled(provider.id),
+    enumerable: true,
+  });
+  Object.defineProperty(provider, 'unavailableReason', {
+    get: () => (!baseAvailable ? baseReason : isProviderEnabled(provider.id) ? undefined : ADMIN_DISABLED_REASON),
+    enumerable: true,
+  });
+  return provider;
+}
+
+const registry: VideoProvider[] = [veoProvider, klingProvider, flowProvider, mockProvider].map(withAdminSwitch);
 
 export function listProviders(): VideoProvider[] {
   return registry;

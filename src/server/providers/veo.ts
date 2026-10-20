@@ -1,7 +1,8 @@
 import { GoogleGenAI, GenerateVideosOperation } from '@google/genai';
 import { ProviderError, VideoProvider, SubmitInput } from './types.ts';
+import { effectiveModel } from '../providerConfig.ts';
 
-const MODEL = process.env.VEO_MODEL || 'veo-3.1-generate-preview';
+const model = () => effectiveModel('veo') as string;
 
 function client(apiKey: string) {
   return new GoogleGenAI({ apiKey });
@@ -47,7 +48,7 @@ export const veoProvider: VideoProvider = {
   },
   async health(credential) {
     try {
-      await client(credential).models.get({ model: MODEL });
+      await client(credential).models.get({ model: model() });
       return { ok: true, reason: 'API key hợp lệ, kết nối Gemini API ổn định' };
     } catch (err) {
       const e = toProviderError(err);
@@ -69,7 +70,7 @@ export const veoProvider: VideoProvider = {
         config.referenceImages = input.refImages.map(img => ({ image: encode(img), referenceType: 'ASSET' }));
       }
       const operation = await client(credential).models.generateVideos({
-        model: MODEL,
+        model: model(),
         prompt: input.prompt,
         image: input.inputImage ? encode(input.inputImage) : undefined,
         config,

@@ -23,6 +23,7 @@ Cập nhật sau đợt rà soát spec v1.0 ↔ code. Cột "Mức xác nhận" 
 | 17 | Account Pool: chọn nền tảng, cấu hình slot | ĐÃ HOÀN THÀNH | Playwright + E2E |
 | 18 | Đăng nhập bằng VAWAY ID (form nhúng + SSO hai chiều), `LOGIN_MODE=admin`, fail-closed | ĐÃ HOÀN THÀNH 21/10/2026 | Harness 19 ca với id thật (chữ ký, kiểm admin, cookie giả/hết hạn, mã giả, signout). Chưa thử đăng nhập bằng trình duyệt thật |
 | 19 | Định tuyến URL `?view=...` | ĐÃ HOÀN THÀNH | Playwright |
+| 20 | ADM-A: backend `/api/admin/*` (phân quyền `SUPERADMIN_VAIDS`, khóa API, cấu hình provider, thông số, thống kê, nhật ký kiểm toán) | ĐÃ HOÀN THÀNH, CHỜ REVIEW | `npm test` 19 ca (AD-01..08) với Postgres thật + kiểm thử đột biến (làm hỏng có chủ đích 4 chỗ, test bắt được cả 4); chạy tay trên server thật có/không có `SUPERADMIN_VAIDS`. Chưa thêm khóa Veo/Kling thật |
 
 ## Giới hạn đã biết
 - Chỉ chạy 1 instance server cho mỗi database (trạng thái tạm dừng và poll nằm trong bộ nhớ).

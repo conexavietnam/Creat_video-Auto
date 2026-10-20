@@ -59,3 +59,15 @@ Health check chạy mỗi 60 giây cho mọi tài khoản enabled và ngay khi t
 
 ## 6. Định tuyến URL
 `?view=batch|studio|accounts|library|progress`.
+
+## 7. Khu quản trị `/admin` (ADM-A, backend)
+Chỉ superadmin vào được; thiết kế đã chốt ở `docs/plans/active/2026-10-21-admin-console.md`.
+
+- **Phân quyền:** `SUPERADMIN_VAIDS` (danh sách VAWAY ID, dấu phẩy). Không đặt hoặc rỗng thì không ai vào được (fail closed, server chỉ cảnh báo lúc khởi động, không dừng). `requireSuperAdmin` (`src/server/auth.ts`) đứng sau `requireAuth`, người không đủ quyền nhận **404**. Người chưa đăng nhập vẫn nhận 401 từ `requireAuth`. Admin của app (`LOGIN_MODE=admin`) không tự động là superadmin.
+- **Route:** `src/server/admin.ts`, mount tại `/api/admin` (`server.ts`). Hợp đồng ở file kế hoạch, riêng hai điểm bổ sung khi cài đặt: `GET /api/admin/audit` trả `{ items: [{id, at, actorVaid, action, target, detail}], nextBefore }` (`detail` đã là object, `nextBefore` null khi hết trang); `GET /api/admin/providers` có thêm `credentialHint` và `settings.effectiveModel` là model đang dùng thật (DB hoặc dự phòng env).
+- **Khóa API vẫn ở bảng `accounts`.** `src/server/accountOps.ts` là nơi duy nhất thêm/thay/xóa khóa, dùng chung cho `/api/admin/*` và nhóm `/api/accounts` (`src/server/accountRoutes.ts`). Ở nhóm cũ, `POST`, `PATCH /:id`, `DELETE /:id` cần superadmin; đọc, bật/tắt, kiểm tra sức khỏe giữ cho mọi admin.
+- **Không lộ khóa:** API chỉ trả `maskedIdentifier`; `admin_audit_log` chỉ lưu trước/sau của các trường an toàn (`src/server/audit.ts` còn tự bỏ mọi khóa có tên credential/secret/token/password/api key). Thay khóa lưu mã che cũ và mới (băm một chiều, không đảo ngược được).
+- **Cấu hình provider ở DB** (`provider_settings`, `src/server/providerConfig.ts`): `enabled`, `model`, `base_url`, đơn giá, ghi chú; nạp vào bộ nhớ khi khởi động, làm mới ngay sau mỗi lần `PUT` và 10 giây một lần. Veo dùng `model`; Kling dùng `model` và `base_url`; chưa có hàng thì dùng env. `enabled=false` được cài ở `src/server/providers/index.ts` (thuộc tính `available` của mọi provider tự phản ánh công tắc), nên `resolveProvider`, dispatcher, thêm tài khoản đều thấy mà không phải sửa. Job đang chạy của provider vừa bị tắt vẫn được poll tiếp, job chờ thì nằm yên cho tới khi bật lại.
+- **Thống kê** (`src/server/adminStats.ts`): SQL gộp, ngày theo `Asia/Ho_Chi_Minh` (giả định cột `timestamp` lưu giờ UTC, đúng khi máy chủ và Postgres đặt múi giờ UTC). `totals`, `perProvider`, `perAccount`, `topErrors`, `retries` tính trên job **tạo** trong khoảng ngày, theo trạng thái hiện tại; `perDay.completed/failed` tính theo ngày **kết thúc**. `queue` là toàn thời gian. Thời gian hoàn thành lấy từ lần chạy cuối của job (retry đặt lại `started_at`). `perAccount` chỉ có job còn giữ `account_id` (job xếp lại hàng chờ bị xóa liên kết). Chi phí chỉ là ước tính `giây video × đơn giá`.
+- **Kiểm thử:** `npm test` (`node --test`, thư mục `tests/`) cần một Postgres riêng với `SQL_DB_NAME` kết thúc bằng `_test` (bộ test xóa dữ liệu bảng, từ chối chạy nếu tên khác). CI dựng sẵn Postgres cho việc này.
+

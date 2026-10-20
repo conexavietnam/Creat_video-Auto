@@ -1,8 +1,9 @@
 import crypto from 'crypto';
 import { ProviderError, VideoProvider } from './types.ts';
+import { effectiveBaseUrl, effectiveModel } from '../providerConfig.ts';
 
-const BASE_URL = process.env.KLING_BASE_URL || 'https://api.klingai.com';
-const MODEL = process.env.KLING_MODEL || 'kling-v2-master';
+const baseUrl = () => effectiveBaseUrl('kling') as string;
+const model = () => effectiveModel('kling') as string;
 
 function b64url(input: Buffer | string) {
   return Buffer.from(input).toString('base64url');
@@ -23,7 +24,7 @@ function signToken(credential: string): string {
 }
 
 async function call(credential: string, method: string, path: string, body?: unknown): Promise<any> {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetch(`${baseUrl()}${path}`, {
     method,
     headers: { Authorization: `Bearer ${signToken(credential)}`, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
@@ -79,7 +80,7 @@ export const klingProvider: VideoProvider = {
   async submit(credential, input) {
     const image = input.inputImage || input.refImages[0];
     const common = {
-      model_name: MODEL,
+      model_name: model(),
       prompt: input.prompt,
       duration: String(input.duration),
     };

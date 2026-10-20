@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, boolean, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, integer, boolean, timestamp, numeric } from 'drizzle-orm/pg-core';
 
 export const accounts = pgTable('accounts', {
   id: serial('id').primaryKey(),
@@ -90,4 +90,24 @@ export const projectProgress = pgTable('project_progress', {
   acceptanceCriteria: text('acceptance_criteria').notNull(),
   status: text('status').notNull().default('todo'),
   createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const providerSettings = pgTable('provider_settings', {
+  providerId: text('provider_id').primaryKey(),
+  enabled: boolean('enabled').notNull().default(true),
+  model: text('model'),
+  baseUrl: text('base_url'),
+  pricePerSecondUsd: numeric('price_per_second_usd', { precision: 10, scale: 4 }),
+  notes: text('notes'),
+  updatedAt: timestamp('updated_at').defaultNow(),
+  updatedBy: text('updated_by'),
+});
+
+export const adminAuditLog = pgTable('admin_audit_log', {
+  id: serial('id').primaryKey(),
+  at: timestamp('at').notNull().defaultNow(),
+  actorVaid: text('actor_vaid').notNull(),
+  action: text('action').notNull(),
+  target: text('target'),
+  detail: text('detail'),
 });

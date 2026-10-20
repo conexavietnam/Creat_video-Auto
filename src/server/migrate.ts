@@ -88,6 +88,25 @@ const statements = [
   `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS default_aspect_ratio text NOT NULL DEFAULT '9:16'`,
   `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS default_provider_id text NOT NULL DEFAULT 'auto'`,
   `CREATE INDEX IF NOT EXISTS idx_video_jobs_status_created ON video_jobs (status, created_at)`,
+  `CREATE TABLE IF NOT EXISTS provider_settings (
+    provider_id text PRIMARY KEY,
+    enabled boolean NOT NULL DEFAULT true,
+    model text,
+    base_url text,
+    price_per_second_usd numeric(10,4),
+    notes text,
+    updated_at timestamp DEFAULT now(),
+    updated_by text
+  )`,
+  `CREATE TABLE IF NOT EXISTS admin_audit_log (
+    id serial PRIMARY KEY,
+    at timestamp NOT NULL DEFAULT now(),
+    actor_vaid text NOT NULL,
+    action text NOT NULL,
+    target text,
+    detail text
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_admin_audit_log_id_desc ON admin_audit_log (id DESC)`,
   `INSERT INTO app_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`,
   `SELECT setval(pg_get_serial_sequence('app_settings', 'id'), GREATEST((SELECT MAX(id) FROM app_settings), 1))`,
 ];

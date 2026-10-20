@@ -110,12 +110,45 @@ function noStore(res: Response) {
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const resolved = await resolveUser(req);
-  if (resolved.ok) return next();
+  if (resolved.ok) {
+    res.locals.user = resolved.user;
+    return next();
+  }
   if (resolved.reason === 'unavailable') {
     return res.status(503).json({ success: false, error: 'Không xác minh được quyền với VAWAY ID, vui lòng thử lại sau' });
   }
   if (resolved.reason === 'revoked') res.setHeader('Set-Cookie', clearCookie());
   res.status(401).json({ success: false, error: 'Chưa đăng nhập hoặc phiên đã hết hạn' });
+}
+
+export function superAdminVaids(): string[] {
+  return (process.env.SUPERADMIN_VAIDS || '')
+    .split(',')
+    .map(v => v.trim())
+    .filter(Boolean);
+}
+
+export function isSuperAdminVaid(vaid: string | undefined | null): boolean {
+  if (!vaid) return false;
+  return superAdminVaids().includes(vaid);
+}
+
+export function warnIfNoSuperAdmin() {
+  if (superAdminVaids().length === 0) {
+    console.warn('SUPERADMIN_VAIDS chưa được đặt: không ai vào được /admin (mọi /api/admin/* trả 404).');
+  }
+}
+
+export function currentUser(res: Response): SessionUser {
+  return res.locals.user as SessionUser;
+}
+
+export function requireSuperAdmin(_req: Request, res: Response, next: NextFunction) {
+  const user = res.locals.user as SessionUser | undefined;
+  if (!user || !isSuperAdminVaid(user.vaid)) {
+    return res.status(404).json({ success: false, error: 'Không tìm thấy' });
+  }
+  next();
 }
 
 export function createAuthRouter(): express.Router {
