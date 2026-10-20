@@ -1,25 +1,56 @@
 # Muse Batch Manager - Kiến trúc Hệ thống (System Architecture)
 
-## 1. Tổng quan Kiến trúc
-Muse Batch Manager được thiết kế theo mô hình Full-Stack React + Node.js/Express tích hợp cơ sở dữ liệu quan hệ PostgreSQL (quản lý qua Drizzle ORM).
+## 1. Tổng quan
+React (Vite) + Node/Express + PostgreSQL (Drizzle ORM). Một tiến trình server chạy cả API lẫn dispatcher.
 
-## 2. Các Bảng Cơ sở dữ liệu (Database Schema)
-- `accounts`: Quản lý danh sách tài khoản video generation, lưu mã hóa credentials (at rest AES-256), trạng thái Online/Offline, sức khỏe phiên, số slot chạy tối đa.
-- `ref_images`: Kho ảnh tham chiếu, lưu trữ tag duy nhất (@tag), tên file, thumbnail/base64/URL, kích thước và loại MIME.
-- `video_jobs`: Quản lý danh sách job video trong hàng đợi, câu prompt gốc, refTags gắn kèm, trạng thái (Chờ, Đang chạy, Hoàn thành, Thất bại, Đã dừng), tiến độ %, số lần thử lại (retry), mã lỗi, video URL & thumbnail MP4.
-- `studio_cards`: Danh sách các thẻ image-to-video trên canvas Flow Studio, lưu tọa độ (x, y), ảnh nguồn, prompt, trạng thái và kết quả video.
-- `app_settings`: Lưu tham số cấu hình hệ thống: số luồng song song, số lần retry tối đa (N), thời gian timeout (X phút), tự động thêm khi paste.
-- `system_logs`: Nhật ký xử lý hệ thống và ghi nhận lỗi.
-- `project_progress`: Bảng thống kê tiến độ thực hiện tính năng cho team.
+```
+server.ts                      Routes API, xác thực, khởi động dispatcher
+src/server/dispatcher.ts       Dispatcher, retry/timeout, health check, dừng tất cả
+src/server/providers/          Adapter nền tảng: veo, kling, flow, mock (+ types, index)
+src/server/jobs.ts             Resolve provider, kiểm tra capability, resolve @tag, tách prompt
+src/server/images.ts           Kiểm tra ảnh (magic bytes), chuẩn hóa tag, trích @tag
+src/server/crypto.ts           AES-256-GCM cho credential
+src/server/auth.ts             Đăng nhập workspace (cookie HttpOnly)
+src/server/storage.ts          Lưu video/thumbnail vào .data/videos (phục vụ qua /media)
+src/server/migrate.ts          CREATE/ALTER IF NOT EXISTS + seed app_settings khi khởi động
+```
 
-## 3. Bộ điều phối Dispatcher & Multi-threading
-- Luồng chạy FIFO: Lấy job "Chờ" cũ nhất.
-- Số luồng hiệu dụng: min(số luồng cấu hình, tổng slot khả dụng của tài khoản Online + Enabled).
-- Tự động gán cuốn chiếu ngay khi có slot trống.
-- Tự động retry tối đa N lần nếu job lỗi; sau N lần ghi nhận lỗi và dừng job.
-- Tự động đánh dấu timeout nếu job đang chạy quá X phút mà không cập nhật tiến độ.
-- Khi tài khoản bị Offline/tắt giữa chừng, các job đang gán cho tài khoản đó lập tức được chuyển về trạng thái "Chờ" để gán cho tài khoản khác.
+## 2. Cơ sở dữ liệu
+- `accounts`: tài khoản của một provider; `encrypted_credential` (AES-256-GCM, định dạng `v1:iv:tag:data`), `provider_id`, `max_slots`, `session_status`, `cooldown_until`.
+- `ref_images`: kho ảnh, `tag` duy nhất, nội dung ảnh dạng data URL.
+- `video_jobs`: `provider_id`, `external_id` (mã thao tác bên nền tảng), `ref_snapshot` (danh sách `{tag, imageId}` ghi lúc tạo job), `input_image_url` (ảnh đầu khung của Studio), `last_progress_at`, `attempts`, `error_code`.
+- `studio_cards`, `app_settings` (kèm mặc định provider/thời lượng/tỉ lệ dùng chung Batch và Studio), `system_logs`, `project_progress`.
 
-## 4. Bảo mật & Định tuyến URL
-- Mọi token / credential được mã hóa bằng AES-256 trước khi lưu database. Không trả lại plaintext trên UI/API.
-- Phân tách đường dẫn theo URL query params: `?view=batch`, `?view=studio`, `?view=accounts`, `?view=library`, `?view=progress` giúp người dùng chia sẻ trực tiếp link tính năng.
+## 3. Provider
+Mỗi nền tảng cài interface `VideoProvider`: `capabilities` (thời lượng, tỉ lệ, số ảnh tham chiếu tối đa), `validate`, `health`, `submit → externalId`, `poll → running | done | failed`, `cancel`. Lỗi trả về bằng `ProviderError(code, retryable)`.
+
+| Provider | Kết nối | Ghi chú |
+|---|---|---|
+| `veo` | API key Gemini | 4/6/8 giây, 16:9 và 9:16; ảnh `@tag` chỉ khi 8 giây + 16:9 (theo tài liệu Veo 3.1, chưa kiểm chứng) |
+| `kling` | `accessKey:secretKey` (JWT HS256) | 5/10 giây; có ảnh → image2video (1 ảnh) |
+| `flow` | phiên trình duyệt | Chưa triển khai, `available=false` |
+| `mock` | bất kỳ chuỗi | Demo/kiểm thử; prompt chứa `[fail]` luôn lỗi, `[hang]` luôn treo |
+
+## 4. Dispatcher
+Mỗi 2 giây (có khóa chống chạy chồng):
+1. Poll từng job `running` (theo `pollIntervalMs` của provider). Hết `timeoutMinutes` mà không có tiến độ mới → `TIMEOUT`.
+2. Nếu không tạm dừng: trong một transaction, lấy job `pending` theo FIFO (`FOR UPDATE SKIP LOCKED`), gán cho tài khoản **cùng provider**, đang enabled + Online + không trong cooldown, còn slot (`max_slots`) và chưa vượt `min(số luồng cấu hình, tổng slot)`.
+3. Gửi job sang provider (ngoài transaction).
+4. Đồng bộ `current_running_jobs`.
+
+Quy tắc lỗi:
+- Lỗi `retryable` và `attempts < maxRetries` → `Chờ`, `attempts + 1`. Hết lượt → `Thất bại` kèm mã lỗi + thông báo tiếng Việt. Timeout được tính vào số lần retry.
+- `AUTH_FAILED` → tài khoản Offline, job về `Chờ` (không tính retry). `RATE_LIMITED` → tài khoản nghỉ 60 giây.
+- Tài khoản bị tắt/xóa/health check hỏng → job đang chạy về `Chờ`, không tính retry.
+- Retry thủ công đặt lại `attempts = 0`.
+- "Dừng tất cả": tạm dừng dispatcher, job đang chạy → `Đã dừng`. "Chạy hàng đợi" hoặc thêm job mới sẽ mở lại.
+
+Health check chạy mỗi 60 giây cho mọi tài khoản enabled và ngay khi thêm/bật/bấm kiểm tra.
+
+## 5. Bảo mật
+- Credential mã hóa AES-256-GCM, khóa từ `CREDENTIAL_KEY` (bắt buộc ở production; dev tự tạo `.data/credential.key`). API không bao giờ trả credential.
+- `APP_ACCESS_TOKEN` đặt thì mọi `/api` và `/media` yêu cầu cookie phiên.
+- Server tự kiểm tra ảnh upload bằng magic bytes và dung lượng thực.
+
+## 6. Định tuyến URL
+`?view=batch|studio|accounts|library|progress`.

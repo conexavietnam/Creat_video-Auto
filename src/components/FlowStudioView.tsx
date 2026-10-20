@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StudioCard, RefImage } from '../types';
+import { StudioCard, RefImage, ProviderInfo } from '../types';
+import { fitOption, loadProviders, loadSettings, pickProvider, saveSettings } from '../api';
 import { Play, Plus, ZoomIn, ZoomOut, Maximize2, Trash2, Download, Upload, Image as ImageIcon, Sparkles, X, Settings } from 'lucide-react';
 
 interface FlowStudioProps {
+  refImages: RefImage[];
   onRefreshState: () => void;
 }
 
-export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) => {
+export const FlowStudioView: React.FC<FlowStudioProps> = ({ refImages, onRefreshState }) => {
   const [cards, setCards] = useState<StudioCard[]>([]);
-  const [refImages, setRefImages] = useState<RefImage[]>([]);
   const [zoom, setZoom] = useState<number>(100);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   
@@ -25,6 +26,47 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
 
   const [studioDuration, setStudioDuration] = useState<number>(10);
   const [studioRatio, setStudioRatio] = useState<'9:16' | '16:9' | '1:1'>('9:16');
+  const [studioProviderId, setStudioProviderId] = useState<string>('');
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const activeProvider = providers.find(p => p.id === studioProviderId);
+  const durationOptions = activeProvider?.capabilities.durations || [5, 10, 15];
+  const ratioOptions = activeProvider?.capabilities.aspectRatios || ['9:16', '16:9', '1:1'];
+
+  const showNotice = (message: string) => {
+    setNotice(message);
+    setTimeout(() => setNotice(null), 8000);
+  };
+
+  useEffect(() => {
+    (async () => {
+      const [settings, list, accountsRes] = await Promise.all([
+        loadSettings(),
+        loadProviders(),
+        fetch('/api/accounts').then(r => r.json()),
+      ]);
+      setProviders(list);
+      const withAccounts = new Set<string>((accountsRes.data || []).map((a: any) => a.providerId));
+      const chosen = pickProvider(list, settings?.defaultProviderId, withAccounts);
+      if (chosen) setStudioProviderId(chosen.id);
+      if (settings && chosen) {
+        setStudioDuration(fitOption(settings.defaultDuration, chosen.capabilities.durations));
+        setStudioRatio(fitOption(settings.defaultAspectRatio, chosen.capabilities.aspectRatios as any));
+      }
+    })();
+  }, []);
+
+  const updateStudioSettings = async (providerId: string, duration: number, ratio: '9:16' | '16:9' | '1:1') => {
+    const next = providers.find(p => p.id === providerId);
+    const fixedDuration = next ? fitOption(duration, next.capabilities.durations) : duration;
+    const fixedRatio = next ? fitOption(ratio, next.capabilities.aspectRatios as any) : ratio;
+    setStudioProviderId(providerId);
+    setStudioDuration(fixedDuration);
+    setStudioRatio(fixedRatio);
+    await saveSettings({ defaultProviderId: providerId, defaultDuration: fixedDuration, defaultAspectRatio: fixedRatio });
+  };
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -33,10 +75,6 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
       const res = await fetch('/api/studio/cards');
       const json = await res.json();
       if (json.success) setCards(json.data);
-
-      const refRes = await fetch('/api/ref-images');
-      const refJson = await refRes.json();
-      if (refJson.success) setRefImages(refJson.data);
     } catch (err) {
       console.error(err);
     }
@@ -78,6 +116,8 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
         setUploadDataUrl(null);
         setSelectedRefImg(null);
         fetchCards();
+      } else {
+        showNotice(json.error || 'Không thể thêm thẻ vào canvas');
       }
     } catch (err) {
       console.error(err);
@@ -94,6 +134,7 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
     if (lastAtIdx !== -1 && !/\s/.test(textBefore.substring(lastAtIdx))) {
       const filterStr = textBefore.substring(lastAtIdx + 1).toLowerCase();
       setCardMentionFilter(filterStr);
+      setMentionIndex(0);
       setActiveMentionCardId(id);
     } else {
       setActiveMentionCardId(null);
@@ -104,6 +145,23 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: val }),
     }).catch(console.error);
+  };
+
+  const handleCardKeys = (cardId: number, e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (activeMentionCardId !== cardId || filteredCardMentions.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setMentionIndex(i => (i + 1) % filteredCardMentions.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setMentionIndex(i => (i - 1 + filteredCardMentions.length) % filteredCardMentions.length);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      selectCardMention(cardId, filteredCardMentions[Math.min(mentionIndex, filteredCardMentions.length - 1)].tag);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setActiveMentionCardId(null);
+    }
   };
 
   const selectCardMention = (cardId: number, tag: string) => {
@@ -176,7 +234,13 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
 
   const handleGenerateAll = async () => {
     try {
-      await fetch('/api/studio/generate-all', { method: 'POST' });
+      const res = await fetch('/api/studio/generate-all', { method: 'POST' });
+      const json = await res.json();
+      if (!json.success) {
+        showNotice(json.error || 'Không thể tạo video');
+      } else if (json.errors?.length > 0) {
+        showNotice(json.errors.join(' · '));
+      }
       fetchCards();
       onRefreshState();
     } catch (err) {
@@ -234,6 +298,15 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
           </button>
         </div>
       </div>
+
+      {notice && (
+        <div className="absolute top-4 right-4 z-30 max-w-sm bg-slate-900 text-white text-xs font-roboto px-4 py-3 rounded-xl shadow-lg flex items-start gap-3">
+          <span className="flex-1">{notice}</span>
+          <button onClick={() => setNotice(null)} className="text-slate-400 hover:text-white">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       <div className="absolute bottom-6 right-6 z-20 bg-white/95 backdrop-blur-xs border border-slate-200 rounded-xl p-2 shadow-md flex items-center gap-2 text-xs font-oswald">
         <button
@@ -323,6 +396,7 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
                 <textarea
                   value={card.prompt}
                   onChange={(e) => handlePromptChange(card.id, e.target.value, e)}
+                  onKeyDown={(e) => handleCardKeys(card.id, e)}
                   rows={2}
                   className="w-full text-xs font-roboto bg-slate-50 border border-slate-300 rounded-lg p-2 focus:ring-1 focus:ring-indigo-500"
                 />
@@ -330,11 +404,12 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
                 {activeMentionCardId === card.id && filteredCardMentions.length > 0 && (
                   <div className="absolute left-0 bottom-full mb-1 z-30 bg-white border border-slate-300 rounded-lg shadow-lg max-h-40 overflow-y-auto w-full p-1">
                     <div className="text-2xs font-oswald text-slate-400 px-2 py-0.5 uppercase">CHỌN ẢNH (@tag)</div>
-                    {filteredCardMentions.map(img => (
+                    {filteredCardMentions.map((img, idx) => (
                       <button
                         key={img.id}
-                        onClick={() => selectCardMention(card.id, img.tag)}
-                        className="w-full text-left px-2 py-1 hover:bg-indigo-50 rounded flex items-center gap-2 text-xs font-mono transition-colors"
+                        onMouseDown={(e) => { e.preventDefault(); selectCardMention(card.id, img.tag); }}
+                        onMouseEnter={() => setMentionIndex(idx)}
+                        className={`w-full text-left px-2 py-1 rounded flex items-center gap-2 text-xs font-mono transition-colors ${idx === mentionIndex ? 'bg-indigo-100' : 'hover:bg-indigo-50'}`}
                       >
                         <img src={img.dataUrl} alt={img.tag} className="w-5 h-5 object-cover rounded border" />
                         <span className="text-indigo-600 font-semibold truncate">@{img.tag}</span>
@@ -374,7 +449,7 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
                       Đang xử lý tạo video...
                     </span>
                   ) : card.status === 'failed' ? (
-                    <span className="text-red-600 font-medium">Lỗi khi tạo video</span>
+                    <span className="text-red-600 font-medium">Lỗi khi tạo video{card.jobId ? ` · xem chi tiết ở tab Hàng đợi (${card.jobId})` : ''}</span>
                   ) : (
                     <span>Chưa tạo · Sẵn sàng</span>
                   )}
@@ -470,15 +545,30 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
 
             <div className="mt-4 space-y-3">
               <div>
-                <label className="text-xs font-roboto text-slate-600 block mb-1">Thời lượng mặc định:</label>
+                <label className="text-xs font-roboto text-slate-600 block mb-1">Nền tảng tạo video:</label>
                 <select
-                  value={studioDuration}
-                  onChange={(e) => setStudioDuration(parseInt(e.target.value))}
+                  value={studioProviderId}
+                  onChange={(e) => updateStudioSettings(e.target.value, studioDuration, studioRatio)}
                   className="w-full text-xs font-roboto bg-slate-50 border border-slate-300 rounded-lg p-2"
                 >
-                  <option value={5}>5 giây</option>
-                  <option value={10}>10 giây</option>
-                  <option value={15}>15 giây</option>
+                  {providers.map(p => (
+                    <option key={p.id} value={p.id} disabled={!p.available}>
+                      {p.label}{p.available ? '' : ' — chưa khả dụng'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-roboto text-slate-600 block mb-1">Thời lượng mặc định (dùng chung với Hàng đợi):</label>
+                <select
+                  value={studioDuration}
+                  onChange={(e) => updateStudioSettings(studioProviderId, parseInt(e.target.value), studioRatio)}
+                  className="w-full text-xs font-roboto bg-slate-50 border border-slate-300 rounded-lg p-2"
+                >
+                  {durationOptions.map(d => (
+                    <option key={d} value={d}>{d} giây</option>
+                  ))}
                 </select>
               </div>
 
@@ -486,12 +576,12 @@ export const FlowStudioView: React.FC<FlowStudioProps> = ({ onRefreshState }) =>
                 <label className="text-xs font-roboto text-slate-600 block mb-1">Tỉ lệ khung hình:</label>
                 <select
                   value={studioRatio}
-                  onChange={(e) => setStudioRatio(e.target.value as any)}
+                  onChange={(e) => updateStudioSettings(studioProviderId, studioDuration, e.target.value as '9:16' | '16:9' | '1:1')}
                   className="w-full text-xs font-roboto bg-slate-50 border border-slate-300 rounded-lg p-2"
                 >
-                  <option value="9:16">9:16 · Dọc</option>
-                  <option value="16:9">16:9 · Ngang</option>
-                  <option value="1:1">1:1 · Vuông</option>
+                  {ratioOptions.includes('9:16') && <option value="9:16">9:16 · Dọc</option>}
+                  {ratioOptions.includes('16:9') && <option value="16:9">16:9 · Ngang</option>}
+                  {ratioOptions.includes('1:1') && <option value="1:1">1:1 · Vuông</option>}
                 </select>
               </div>
 

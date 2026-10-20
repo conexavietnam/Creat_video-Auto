@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Account } from '../types';
+import { Account, ProviderInfo } from '../types';
+import { loadProviders } from '../api';
 import { Users, Plus, Shield, RefreshCw, Trash2, Power, CheckCircle, AlertTriangle, Key, Activity } from 'lucide-react';
 
 interface AccountPoolProps {
@@ -11,6 +12,9 @@ export const AccountPoolView: React.FC<AccountPoolProps> = ({ onRefreshState }) 
   const [showAddModal, setShowAddModal] = useState(false);
   const [nameInput, setNameInput] = useState('');
   const [credentialInput, setCredentialInput] = useState('');
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [providerInput, setProviderInput] = useState('');
+  const [slotsInput, setSlotsInput] = useState(1);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const fetchAccounts = async () => {
@@ -25,7 +29,30 @@ export const AccountPoolView: React.FC<AccountPoolProps> = ({ onRefreshState }) 
 
   useEffect(() => {
     fetchAccounts();
+    loadProviders().then(list => {
+      setProviders(list);
+      const first = list.find(p => p.available);
+      if (first) setProviderInput(first.id);
+    });
+    const interval = setInterval(fetchAccounts, 5000);
+    return () => clearInterval(interval);
   }, []);
+
+  const selectedProvider = providers.find(p => p.id === providerInput);
+
+  const handleSlotsChange = async (id: number, value: number) => {
+    try {
+      await fetch(`/api/accounts/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maxSlots: value }),
+      });
+      fetchAccounts();
+      onRefreshState();
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const handleAddAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,7 +65,7 @@ export const AccountPoolView: React.FC<AccountPoolProps> = ({ onRefreshState }) 
       const res = await fetch('/api/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: nameInput, credential: credentialInput }),
+        body: JSON.stringify({ name: nameInput, credential: credentialInput, providerId: providerInput, maxSlots: slotsInput }),
       });
 
       const json = await res.json();
@@ -138,6 +165,7 @@ export const AccountPoolView: React.FC<AccountPoolProps> = ({ onRefreshState }) 
               <div>
                 <h3 className="font-oswald font-bold text-slate-900 text-base">{acc.name}</h3>
                 <span className="text-2xs font-mono text-slate-400 block">{acc.maskedIdentifier}</span>
+                <span className="text-2xs font-roboto text-indigo-600 block">{acc.providerLabel}</span>
               </div>
 
               <button
@@ -172,9 +200,24 @@ export const AccountPoolView: React.FC<AccountPoolProps> = ({ onRefreshState }) 
               </div>
 
               <div className="flex items-center justify-between">
+                <span>Số slot đồng thời:</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  defaultValue={acc.maxSlots}
+                  onBlur={(e) => {
+                    const value = parseInt(e.target.value);
+                    if (value >= 1 && value <= 20 && value !== acc.maxSlots) handleSlotsChange(acc.id, value);
+                  }}
+                  className="w-14 text-xs font-mono bg-slate-50 border border-slate-300 rounded-md px-2 py-0.5 text-center"
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
                 <span>Khóa bảo mật:</span>
                 <span className="font-mono text-2xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
-                  {acc.encryptedCredential}
+                  Đã mã hóa AES-256
                 </span>
               </div>
 
@@ -226,6 +269,21 @@ export const AccountPoolView: React.FC<AccountPoolProps> = ({ onRefreshState }) 
 
             <div className="mt-4 space-y-4">
               <div>
+                <label className="text-xs font-roboto text-slate-700 block mb-1 font-medium">Nền tảng tạo video:</label>
+                <select
+                  value={providerInput}
+                  onChange={(e) => setProviderInput(e.target.value)}
+                  className="w-full text-xs font-roboto bg-slate-50 border border-slate-300 rounded-lg p-2.5"
+                >
+                  {providers.map(p => (
+                    <option key={p.id} value={p.id} disabled={!p.available}>
+                      {p.label}{p.available ? '' : ' — chưa khả dụng'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
                 <label className="text-xs font-roboto text-slate-700 block mb-1 font-medium">Tên gợi nhớ tài khoản:</label>
                 <input
                   type="text"
@@ -242,12 +300,24 @@ export const AccountPoolView: React.FC<AccountPoolProps> = ({ onRefreshState }) 
                   value={credentialInput}
                   onChange={(e) => setCredentialInput(e.target.value)}
                   rows={3}
-                  placeholder="Dán token đăng nhập hoặc API key vào đây..."
+                  placeholder={selectedProvider ? `Dán ${selectedProvider.credentialHint} vào đây...` : 'Dán token đăng nhập hoặc API key vào đây...'}
                   className="w-full text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg p-2.5"
                 />
                 <span className="text-2xs text-slate-400 font-roboto mt-1 block">
                   Thông tin sẽ được mã hóa AES-256 ngay khi lưu và không bao giờ xuất hiện dạng plaintext.
                 </span>
+              </div>
+
+              <div>
+                <label className="text-xs font-roboto text-slate-700 block mb-1 font-medium">Số slot đồng thời của tài khoản:</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={slotsInput}
+                  onChange={(e) => setSlotsInput(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-24 text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg p-2 text-center"
+                />
               </div>
 
               <div className="pt-4 border-t border-slate-200 flex justify-end gap-3">

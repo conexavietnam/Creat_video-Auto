@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { VideoJob, RefImage, AppSettings } from '../types';
-import { Play, Square, Plus, Trash2, Search, Download, ChevronLeft, ChevronRight, AlertTriangle, CheckCircle, Clock, AlertCircle, RefreshCw, X, FileText, Settings, Sparkles, Layers } from 'lucide-react';
+import { VideoJob, RefImage, AppSettings, ProviderInfo } from '../types';
+import { extractTags, fitOption, loadProviders, pickProvider, saveSettings } from '../api';
+import { Play, Square, Plus, Trash2, Search, Download, ChevronLeft, ChevronRight, AlertTriangle, CheckCircle, Clock, AlertCircle, RefreshCw, X, FileText, Settings, Sparkles, Layers, Film } from 'lucide-react';
 
 interface BatchManagerProps {
+  refImages: RefImage[];
   onRefreshState: () => void;
 }
 
-export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }) => {
+export const BatchManagerView: React.FC<BatchManagerProps> = ({ refImages: refImagesList, onRefreshState }) => {
   const [promptText, setPromptText] = useState('');
   const [splitMode, setSplitMode] = useState<'line' | 'paragraph' | 'all'>('line');
   const [promptCount, setPromptCount] = useState(0);
@@ -16,8 +18,10 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
   const [concurrency, setConcurrency] = useState<number>(3);
   const [autoPasteEnqueue, setAutoPasteEnqueue] = useState<boolean>(true);
   const [batchRefTag, setBatchRefTag] = useState<string>('');
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [providerId, setProviderId] = useState<string>('');
+  const [mentionIndex, setMentionIndex] = useState(0);
 
-  const [refImagesList, setRefImagesList] = useState<RefImage[]>([]);
   const [detectedTags, setDetectedTags] = useState<string[]>([]);
   const [missingTags, setMissingTags] = useState<string[]>([]);
 
@@ -45,15 +49,19 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
   const [activePlayingJobId, setActivePlayingJobId] = useState<string | null>(null);
 
   const pasteTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pasteArmedRef = useRef(false);
+  const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const enqueueRef = useRef<(auto: boolean) => void>(() => {});
+  const lastAddedTextRef = useRef('');
 
-  const fetchRefImages = async () => {
-    try {
-      const res = await fetch('/api/ref-images');
-      const json = await res.json();
-      if (json.success) setRefImagesList(json.data);
-    } catch (err) {
-      console.error(err);
-    }
+  const activeProvider = providers.find(p => p.id === providerId);
+  const durationOptions = activeProvider?.capabilities.durations || [5, 10, 15];
+  const ratioOptions = (activeProvider?.capabilities.aspectRatios || ['9:16', '16:9', '1:1']) as Array<'9:16' | '16:9' | '1:1'>;
+
+  const showToast = (message: string, ms = 5000) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToastMsg(message);
+    toastTimerRef.current = setTimeout(() => setToastMsg(null), ms);
   };
 
   const fetchSettings = async () => {
@@ -64,9 +72,14 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
         const s: AppSettings = json.data;
         setConcurrency(s.concurrencyLimit);
         setAutoPasteEnqueue(s.autoEnqueueOnPaste);
+        setDuration(s.defaultDuration);
+        setAspectRatio(s.defaultAspectRatio);
+        return s;
       }
+      return null;
     } catch (err) {
       console.error(err);
+      return null;
     }
   };
 
@@ -103,9 +116,35 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
   };
 
   useEffect(() => {
-    fetchRefImages();
-    fetchSettings();
+    (async () => {
+      const [settings, list, accountsRes] = await Promise.all([
+        fetchSettings(),
+        loadProviders(),
+        fetch('/api/accounts').then(r => r.json()),
+      ]);
+      setProviders(list);
+      const withAccounts = new Set<string>((accountsRes.data || []).map((a: any) => a.providerId));
+      const chosen = pickProvider(list, settings?.defaultProviderId, withAccounts);
+      if (chosen) {
+        setProviderId(chosen.id);
+        if (settings) {
+          setDuration(fitOption(settings.defaultDuration, chosen.capabilities.durations));
+          setAspectRatio(fitOption(settings.defaultAspectRatio, chosen.capabilities.aspectRatios as any));
+        }
+      }
+    })();
   }, []);
+
+  const handleProviderChange = (id: string) => {
+    setProviderId(id);
+    const next = providers.find(p => p.id === id);
+    if (!next) return;
+    const nextDuration = fitOption(duration, next.capabilities.durations);
+    const nextRatio = fitOption(aspectRatio, next.capabilities.aspectRatios as any);
+    setDuration(nextDuration);
+    setAspectRatio(nextRatio);
+    saveSettings({ defaultProviderId: id, defaultDuration: nextDuration, defaultAspectRatio: nextRatio });
+  };
 
   useEffect(() => {
     fetchJobs();
@@ -133,9 +172,8 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
 
       setPromptCount(count);
 
-      const matches = promptText.match(/@([a-z0-9-_]+)/gi) || [];
-      const tags = Array.from(new Set(matches.map(m => m.substring(1).toLowerCase())));
-      
+      const tags = extractTags(promptText);
+
       const availableTags = refImagesList.map(i => i.tag);
       const valid = tags.filter(t => availableTags.includes(t));
       const missing = tags.filter(t => !availableTags.includes(t));
@@ -151,6 +189,11 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
     const val = e.target.value;
     setPromptText(val);
 
+    if (pasteArmedRef.current) {
+      if (pasteTimerRef.current) clearTimeout(pasteTimerRef.current);
+      pasteTimerRef.current = setTimeout(() => enqueueRef.current(true), 2000);
+    }
+
     const cursorPos = e.target.selectionStart;
     const textBefore = val.substring(0, cursorPos);
     const lastAtIdx = textBefore.lastIndexOf('@');
@@ -158,6 +201,7 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
     if (lastAtIdx !== -1 && !/\s/.test(textBefore.substring(lastAtIdx))) {
       const filterStr = textBefore.substring(lastAtIdx + 1).toLowerCase();
       setMentionFilter(filterStr);
+      setMentionIndex(0);
       setShowMentionDropdown(true);
     } else {
       setShowMentionDropdown(false);
@@ -169,11 +213,26 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
     const pasted = e.clipboardData.getData('text');
     if (!pasted || !pasted.trim()) return;
 
+    pasteArmedRef.current = true;
     if (pasteTimerRef.current) clearTimeout(pasteTimerRef.current);
+    pasteTimerRef.current = setTimeout(() => enqueueRef.current(true), 2000);
+  };
 
-    pasteTimerRef.current = setTimeout(() => {
-      enqueuePrompts(pasted);
-    }, 2000);
+  const handleMentionKeys = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!showMentionDropdown || filteredMentions.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setMentionIndex(i => (i + 1) % filteredMentions.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setMentionIndex(i => (i - 1 + filteredMentions.length) % filteredMentions.length);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      selectMention(filteredMentions[Math.min(mentionIndex, filteredMentions.length - 1)].tag);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowMentionDropdown(false);
+    }
   };
 
   const selectMention = (tag: string) => {
@@ -193,9 +252,12 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
     textareaRef.current.focus();
   };
 
-  const enqueuePrompts = async (textToEnqueue?: string) => {
-    const targetText = textToEnqueue || promptText;
-    if (!targetText || !targetText.trim()) return;
+  const enqueuePrompts = async (auto = false) => {
+    if (pasteTimerRef.current) clearTimeout(pasteTimerRef.current);
+    pasteArmedRef.current = false;
+
+    const targetText = textareaRef.current ? textareaRef.current.value : promptText;
+    if (!targetText.trim()) return;
 
     try {
       const res = await fetch('/api/queue/enqueue', {
@@ -206,30 +268,31 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
           splitMode,
           duration,
           aspectRatio,
-          concurrency,
+          providerId,
           batchRefTag: batchRefTag || undefined,
         }),
       });
 
       const json = await res.json();
       if (json.success) {
-        const addedCount = json.count;
-        const newIds = json.jobs.map((j: any) => j.id);
-        setLastAddedJobIds(newIds);
-        setToastMsg(`Đã tự động thêm ${addedCount} prompt vào hàng đợi!`);
-        
-        if (!textToEnqueue) {
-          setPromptText('');
-        }
-
+        setLastAddedJobIds(json.jobs.map((j: any) => j.id));
+        lastAddedTextRef.current = targetText;
+        setPromptText('');
+        showToast(auto ? `Đã tự động thêm ${json.count} prompt vào hàng đợi!` : `Đã thêm ${json.count} prompt vào hàng đợi!`);
         fetchJobs();
         onRefreshState();
-
-        setTimeout(() => setToastMsg(null), 5000);
+      } else {
+        setLastAddedJobIds([]);
+        showToast(json.error || 'Không thể thêm prompt vào hàng đợi', 8000);
       }
     } catch (err) {
       console.error(err);
+      showToast('Lỗi kết nối máy chủ', 8000);
     }
+  };
+
+  enqueueRef.current = (auto: boolean) => {
+    void enqueuePrompts(auto);
   };
 
   const handleUndoLastAdded = async () => {
@@ -238,11 +301,11 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
       for (const id of lastAddedJobIds) {
         await fetch(`/api/queue/jobs/${id}`, { method: 'DELETE' });
       }
-      setToastMsg('Đã hoàn tác đợt thêm prompt!');
+      setPromptText(lastAddedTextRef.current);
       setLastAddedJobIds([]);
+      showToast('Đã hoàn tác đợt thêm prompt, nội dung đã được khôi phục vào ô nhập!', 3000);
       fetchJobs();
       onRefreshState();
-      setTimeout(() => setToastMsg(null), 3000);
     } catch (err) {
       console.error(err);
     }
@@ -250,7 +313,7 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
 
   const handleStartQueue = async () => {
     if (onlineAccountsCount === 0) {
-      setToastMsg('Không còn tài khoản Online nào trong pool! Vui lòng bật hoặc thêm tài khoản để chạy hàng đợi.');
+      showToast('Không còn tài khoản Online nào trong pool! Vui lòng bật hoặc thêm tài khoản để chạy hàng đợi.', 8000);
       return;
     }
 
@@ -258,13 +321,13 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
       const res = await fetch('/api/queue/process', { method: 'POST' });
       const json = await res.json();
       if (!json.success) {
-        setToastMsg(json.error || 'Lỗi khi khởi động dispatcher');
+        showToast(json.error || 'Lỗi khi khởi động dispatcher', 8000);
         return;
       }
       fetchJobs();
       onRefreshState();
     } catch (err: any) {
-      setToastMsg(err.message || 'Lỗi kết nối máy chủ');
+      showToast(err.message || 'Lỗi kết nối máy chủ', 8000);
     }
   };
 
@@ -310,11 +373,7 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
 
   const applyConcurrency = async () => {
     try {
-      await fetch('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ concurrencyLimit: concurrency, autoEnqueueOnPaste: autoPasteEnqueue }),
-      });
+      await saveSettings({ concurrencyLimit: concurrency });
       fetchJobs();
       onRefreshState();
     } catch (err) {
@@ -378,6 +437,7 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
                 value={promptText}
                 onChange={handleTextareaChange}
                 onPaste={handlePaste}
+                onKeyDown={handleMentionKeys}
                 rows={7}
                 placeholder="Dán danh sách prompt ở đây (mỗi dòng 1 prompt). Gõ @ để chèn ảnh tham chiếu..."
                 className="w-full text-xs font-roboto bg-slate-50 border border-slate-300 rounded-lg p-3 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 resize-y leading-relaxed"
@@ -386,11 +446,12 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
               {showMentionDropdown && filteredMentions.length > 0 && (
                 <div className="absolute left-3 bottom-12 z-30 bg-white border border-slate-300 rounded-lg shadow-lg max-h-48 overflow-y-auto w-64 p-1">
                   <div className="text-2xs font-oswald text-slate-400 px-2 py-1 uppercase">GỢI Ý KHO ẢNH (@tag)</div>
-                  {filteredMentions.map(img => (
+                  {filteredMentions.map((img, idx) => (
                     <button
                       key={img.id}
-                      onClick={() => selectMention(img.tag)}
-                      className="w-full text-left px-2 py-1.5 hover:bg-indigo-50 rounded flex items-center gap-2 text-xs font-mono transition-colors"
+                      onMouseDown={(e) => { e.preventDefault(); selectMention(img.tag); }}
+                      onMouseEnter={() => setMentionIndex(idx)}
+                      className={`w-full text-left px-2 py-1.5 rounded flex items-center gap-2 text-xs font-mono transition-colors ${idx === mentionIndex ? 'bg-indigo-100' : 'hover:bg-indigo-50'}`}
                     >
                       <img src={img.dataUrl} alt={img.tag} className="w-6 h-6 object-cover rounded border border-slate-200" />
                       <span className="text-indigo-600 font-semibold">@{img.tag}</span>
@@ -427,17 +488,41 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
             </div>
 
             <div className="border-t border-slate-200 pt-3 space-y-3">
+              <div>
+                <label className="text-2xs font-roboto text-slate-600 block mb-1">Nền tảng tạo video:</label>
+                <select
+                  value={providerId}
+                  onChange={(e) => handleProviderChange(e.target.value)}
+                  className="w-full text-xs font-roboto bg-slate-50 border border-slate-300 rounded-md px-2.5 py-1.5"
+                >
+                  {providers.map(p => (
+                    <option key={p.id} value={p.id} disabled={!p.available}>
+                      {p.label}{p.available ? '' : ' — chưa khả dụng'}
+                    </option>
+                  ))}
+                </select>
+                {activeProvider && (
+                  <span className="text-2xs text-slate-400 font-roboto mt-1 block">
+                    Tối đa {activeProvider.capabilities.maxRefImages} ảnh tham chiếu / video
+                  </span>
+                )}
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-2xs font-roboto text-slate-600 block mb-1">Thời lượng:</label>
                   <select
                     value={duration}
-                    onChange={(e) => setDuration(parseInt(e.target.value))}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value);
+                      setDuration(value);
+                      saveSettings({ defaultDuration: value });
+                    }}
                     className="w-full text-xs font-roboto bg-slate-50 border border-slate-300 rounded-md px-2.5 py-1.5"
                   >
-                    <option value={5}>5 giây</option>
-                    <option value={10}>10 giây (Mặc định)</option>
-                    <option value={15}>15 giây</option>
+                    {durationOptions.map(d => (
+                      <option key={d} value={d}>{d} giây{d === 10 ? ' (Mặc định)' : ''}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -445,12 +530,16 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
                   <label className="text-2xs font-roboto text-slate-600 block mb-1">Tỉ lệ khung hình:</label>
                   <select
                     value={aspectRatio}
-                    onChange={(e) => setAspectRatio(e.target.value as any)}
+                    onChange={(e) => {
+                      const value = e.target.value as '9:16' | '16:9' | '1:1';
+                      setAspectRatio(value);
+                      saveSettings({ defaultAspectRatio: value });
+                    }}
                     className="w-full text-xs font-roboto bg-slate-50 border border-slate-300 rounded-md px-2.5 py-1.5"
                   >
-                    <option value="9:16">9:16 · Dọc (Mặc định)</option>
-                    <option value="16:9">16:9 · Ngang</option>
-                    <option value="1:1">1:1 · Vuông</option>
+                    {ratioOptions.includes('9:16') && <option value="9:16">9:16 · Dọc (Mặc định)</option>}
+                    {ratioOptions.includes('16:9') && <option value="16:9">16:9 · Ngang</option>}
+                    {ratioOptions.includes('1:1') && <option value="1:1">1:1 · Vuông</option>}
                   </select>
                 </div>
               </div>
@@ -497,7 +586,14 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
                   <input
                     type="checkbox"
                     checked={autoPasteEnqueue}
-                    onChange={(e) => setAutoPasteEnqueue(e.target.checked)}
+                    onChange={(e) => {
+                      setAutoPasteEnqueue(e.target.checked);
+                      saveSettings({ autoEnqueueOnPaste: e.target.checked });
+                      if (!e.target.checked) {
+                        pasteArmedRef.current = false;
+                        if (pasteTimerRef.current) clearTimeout(pasteTimerRef.current);
+                      }
+                    }}
                     className="rounded text-indigo-600 focus:ring-indigo-500"
                   />
                   <span>Dán là chạy luôn (~2s)</span>
@@ -508,7 +604,7 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
 
           <div className="pt-4 border-t border-slate-200 flex items-center justify-between gap-3 mt-4">
             <button
-              onClick={() => enqueuePrompts()}
+              onClick={() => enqueuePrompts(false)}
               disabled={promptCount === 0}
               className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-oswald font-medium py-2.5 px-4 rounded-lg text-sm transition-colors shadow-xs flex items-center justify-center gap-2"
             >
@@ -549,11 +645,17 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {runningStripJobs.map(rJob => (
                   <div key={rJob.id} className="bg-indigo-900/80 border border-indigo-700/80 rounded-lg p-3 flex items-center gap-3">
-                    <img
-                      src={rJob.thumbnailUrl}
-                      alt={rJob.id}
-                      className="w-12 h-12 object-cover rounded-md border border-indigo-700 shrink-0"
-                    />
+                    {rJob.thumbnailUrl ? (
+                      <img
+                        src={rJob.thumbnailUrl}
+                        alt={rJob.id}
+                        className="w-12 h-12 object-cover rounded-md border border-indigo-700 shrink-0"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-md border border-indigo-700 shrink-0 bg-indigo-950 flex items-center justify-center">
+                        <Film className="w-5 h-5 text-indigo-400" />
+                      </div>
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between text-2xs font-mono text-indigo-200 mb-1">
                         <span className="font-semibold text-amber-300">{rJob.id}</span>
@@ -667,11 +769,15 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
                           onClick={() => job.status === 'completed' && setActivePlayingJobId(isPlaying ? null : job.id)}
                           className={`w-14 h-14 rounded-md overflow-hidden bg-slate-200 shrink-0 border border-slate-300 relative ${job.status === 'completed' ? 'cursor-pointer hover:opacity-90' : ''}`}
                         >
-                          <img
-                            src={job.thumbnailUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=150&q=80'}
-                            alt={job.id}
-                            className="w-full h-full object-cover"
-                          />
+                          {job.thumbnailUrl ? (
+                            <img src={job.thumbnailUrl} alt={job.id} className="w-full h-full object-cover" />
+                          ) : job.status === 'completed' && job.videoUrl ? (
+                            <video src={`${job.videoUrl}#t=0.1`} preload="metadata" muted className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Film className="w-5 h-5 text-slate-400" />
+                            </div>
+                          )}
                           {job.status === 'completed' && (
                             <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
                               <Play className="w-5 h-5 text-white fill-white" />
@@ -685,7 +791,7 @@ export const BatchManagerView: React.FC<BatchManagerProps> = ({ onRefreshState }
                         >
                           <div className="flex items-center gap-2 mb-1">
                             <span className="text-xs font-mono font-bold text-slate-900">{job.id}</span>
-                            <span className="text-2xs text-slate-400 font-roboto">· {job.duration}s · {job.aspectRatio}</span>
+                            <span className="text-2xs text-slate-400 font-roboto">· {job.duration}s · {job.aspectRatio} · {job.providerId}</span>
                             
                             {job.status === 'pending' && <span className="bg-slate-200 text-slate-700 text-2xs font-roboto px-2 py-0.5 rounded">Chờ</span>}
                             {job.status === 'running' && <span className="bg-amber-100 text-amber-800 text-2xs font-roboto px-2 py-0.5 rounded font-bold">Đang chạy ({job.progress}%)</span>}

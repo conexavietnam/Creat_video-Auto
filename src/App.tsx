@@ -7,12 +7,28 @@ import { FlowStudioView } from './components/FlowStudioView';
 import { RefLibraryModal } from './components/RefLibraryModal';
 import { AccountPoolView } from './components/AccountPoolView';
 import { ProgressAndLogsView } from './components/ProgressAndLogsView';
+import { LoginView } from './components/LoginView';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'batch' | 'studio' | 'library' | 'accounts' | 'progress'>('batch');
   const [overviewState, setOverviewState] = useState<OverviewState | null>(null);
   const [refImagesList, setRefImagesList] = useState<RefImage[]>([]);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [authState, setAuthState] = useState<'checking' | 'required' | 'ok'>('checking');
+
+  const checkAuth = async () => {
+    try {
+      const res = await fetch('/api/auth/status');
+      const json = await res.json();
+      setAuthState(json.data.required && !json.data.authenticated ? 'required' : 'ok');
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => {
+    checkAuth();
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -32,6 +48,10 @@ export default function App() {
   const fetchRefImages = async () => {
     try {
       const res = await fetch('/api/ref-images');
+      if (res.status === 401) {
+        setAuthState('required');
+        return;
+      }
       const json = await res.json();
       if (json.success) {
         setRefImagesList(json.data);
@@ -44,6 +64,10 @@ export default function App() {
   const fetchOverviewState = async () => {
     try {
       const res = await fetch('/api/state');
+      if (res.status === 401) {
+        setAuthState('required');
+        return;
+      }
       const json = await res.json();
       if (json.success) {
         setOverviewState(json.data);
@@ -54,14 +78,19 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (authState !== 'ok') return;
     fetchOverviewState();
     fetchRefImages();
-    const interval = setInterval(() => {
-      fetchOverviewState();
-      fetchRefImages();
-    }, 2000);
-    return () => clearInterval(interval);
-  }, []);
+    const stateInterval = setInterval(fetchOverviewState, 2000);
+    const refInterval = setInterval(fetchRefImages, 20000);
+    return () => {
+      clearInterval(stateInterval);
+      clearInterval(refInterval);
+    };
+  }, [authState]);
+
+  if (authState === 'checking') return null;
+  if (authState === 'required') return <LoginView onLoggedIn={() => setAuthState('ok')} />;
 
   return (
     <div className="min-h-screen bg-slate-50 font-roboto text-slate-900 flex flex-col">
@@ -94,6 +123,7 @@ export default function App() {
       <main className="flex-1">
         {activeTab === 'batch' && (
           <BatchManagerView
+            refImages={refImagesList}
             onRefreshState={() => {
               fetchOverviewState();
               fetchRefImages();
@@ -103,6 +133,7 @@ export default function App() {
 
         {activeTab === 'studio' && (
           <FlowStudioView
+            refImages={refImagesList}
             onRefreshState={() => {
               fetchOverviewState();
               fetchRefImages();

@@ -2,7 +2,8 @@ export interface Account {
   id: number;
   name: string;
   maskedIdentifier: string;
-  encryptedCredential: string;
+  providerId: string;
+  providerLabel: string;
   isEnabled: boolean;
   sessionStatus: 'online' | 'offline';
   currentRunningJobs: number;
@@ -31,6 +32,7 @@ export interface VideoJob {
   duration: number;
   aspectRatio: '9:16' | '16:9' | '1:1';
   accountId?: number;
+  providerId: string;
   attempts: number;
   errorCode?: string;
   errorMessage?: string;
@@ -60,7 +62,25 @@ export interface AppSettings {
   maxRetries: number;
   timeoutMinutes: number;
   autoEnqueueOnPaste: boolean;
+  defaultDuration: number;
+  defaultAspectRatio: '9:16' | '16:9' | '1:1';
+  defaultProviderId: string;
   updatedAt: string;
+}
+
+export interface ProviderInfo {
+  id: string;
+  label: string;
+  kind: 'api_key' | 'browser_session' | 'demo';
+  credentialHint: string;
+  available: boolean;
+  unavailableReason?: string;
+  capabilities: {
+    durations: number[];
+    aspectRatios: string[];
+    maxRefImages: number;
+    supportsImageToVideo: boolean;
+  };
 }
 
 export interface ProjectProgressItem {
@@ -93,7 +113,7 @@ export interface OverviewState {
     elapsedSeconds: number;
     aspectRatio: string;
     duration: number;
-    thumbnailUrl: string;
+    thumbnailUrl: string | null;
   }>;
   isDispatcherActive: boolean;
 }
