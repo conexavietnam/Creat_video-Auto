@@ -1,4 +1,4 @@
-// Kiểm thử đăng nhập VAWAY ID với id thật. Chạy trên VPS: export CREDENTIAL_KEY=$(openssl rand -hex 32) $(grep '^VAID_|^LOGIN_MODE' ~/app.env | xargs); unset NODE_ENV; npx tsx scripts/test-auth-live.mts
+// Kiểm thử đăng nhập VAWAY ID với id thật. Chạy trên VPS: export CREDENTIAL_KEY=$(openssl rand -hex 32) $(grep -E '^(VAID_|LOGIN_MODE)' ~/app.env | xargs); unset NODE_ENV; npx tsx scripts/test-auth-live.mts
 import crypto from 'node:crypto';
 import express from 'express';
 import { assertAuthConfigured, createAuthRouter, requireAuth } from '../src/server/auth.ts';
