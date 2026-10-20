@@ -6,7 +6,7 @@ import { accounts, refImages, videoJobs, studioCards, appSettings, projectProgre
 import { eq, desc, sql, like, or, and, ilike, getTableColumns } from 'drizzle-orm';
 import { migrate } from './src/server/migrate.ts';
 import { encryptCredential, maskIdentifier } from './src/server/crypto.ts';
-import { isAuthRequired, isAuthenticated, login, logout, requireAuth } from './src/server/auth.ts';
+import { assertAuthConfigured, createAuthRouter, requireAuth } from './src/server/auth.ts';
 import { decodeImage, extractTags, MAX_IMAGE_BYTES, normalizeTag } from './src/server/images.ts';
 import { VIDEO_DIR, removeVideoFiles } from './src/server/storage.ts';
 import { getProvider, listProviders, publicProvider } from './src/server/providers/index.ts';
@@ -33,6 +33,10 @@ const PORT = process.env.PORT || 3000;
 const DURATIONS = [4, 5, 6, 8, 10, 15];
 const RATIOS = ['9:16', '16:9', '1:1'];
 
+assertAuthConfigured();
+app.set('trust proxy', 'loopback');
+app.use(createAuthRouter());
+app.use('/api', requireAuth);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -49,13 +53,6 @@ function fail(res: express.Response, err: any) {
   res.status(500).json({ success: false, error: 'Lỗi máy chủ nội bộ' });
 }
 
-app.get('/api/auth/status', (req, res) => {
-  res.json({ success: true, data: { required: isAuthRequired(), authenticated: isAuthenticated(req) } });
-});
-app.post('/api/auth/login', login);
-app.post('/api/auth/logout', logout);
-
-app.use('/api', requireAuth);
 app.use('/media', requireAuth, express.static(VIDEO_DIR));
 
 app.get('/api/providers', (_req, res) => {

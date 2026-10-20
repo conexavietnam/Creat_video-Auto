@@ -21,7 +21,7 @@ Cập nhật sau đợt rà soát spec v1.0 ↔ code. Cột "Mức xác nhận" 
 | 15 | Dải Đang chạy trực tiếp, danh sách 1 dòng, xem trước rồi tải | ĐÃ HOÀN THÀNH | Playwright. Thumbnail tạo bằng ffmpeg nếu máy có |
 | 16 | Flow Studio dùng chung provider/thời lượng/tỉ lệ, gửi ảnh đầu vào | ĐÃ HOÀN THÀNH | E2E (AC-11); chưa test kéo-thả bằng UI tự động |
 | 17 | Account Pool: chọn nền tảng, cấu hình slot | ĐÃ HOÀN THÀNH | Playwright + E2E |
-| 18 | Đăng nhập workspace bằng `APP_ACCESS_TOKEN` | ĐÃ HOÀN THÀNH (mức tối thiểu) | curl: 401 khi thiếu cookie, 200 khi đăng nhập. Chỉ 1 workspace/1 mã truy cập |
+| 18 | Đăng nhập bằng VAWAY ID (form nhúng + SSO hai chiều), `LOGIN_MODE=admin`, fail-closed | ĐÃ HOÀN THÀNH 21/10/2026 | Harness 19 ca với id thật (chữ ký, kiểm admin, cookie giả/hết hạn, mã giả, signout). Chưa thử đăng nhập bằng trình duyệt thật |
 | 19 | Định tuyến URL `?view=...` | ĐÃ HOÀN THÀNH | Playwright |
 
 ## Giới hạn đã biết

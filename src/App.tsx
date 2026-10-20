@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { OverviewState, RefImage } from './types';
 import { Header } from './components/Header';
 import { PersistentRefLibraryBar } from './components/PersistentRefLibraryBar';
@@ -8,6 +8,7 @@ import { RefLibraryModal } from './components/RefLibraryModal';
 import { AccountPoolView } from './components/AccountPoolView';
 import { ProgressAndLogsView } from './components/ProgressAndLogsView';
 import { LoginView } from './components/LoginView';
+import { AuthInfo, consumeAuthHash, loadAuthStatus, loadVaidLoader, logout } from './api';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'batch' | 'studio' | 'library' | 'accounts' | 'progress'>('batch');
@@ -15,20 +16,28 @@ export default function App() {
   const [refImagesList, setRefImagesList] = useState<RefImage[]>([]);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [authState, setAuthState] = useState<'checking' | 'required' | 'ok'>('checking');
+  const [authInfo, setAuthInfo] = useState<AuthInfo | null>(null);
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
 
-  const checkAuth = async () => {
+  const checkAuth = useCallback(async () => {
     try {
-      const res = await fetch('/api/auth/status');
-      const json = await res.json();
-      setAuthState(json.data.required && !json.data.authenticated ? 'required' : 'ok');
+      const info = await loadAuthStatus();
+      setAuthInfo(info);
+      if (info?.unavailable) setAuthNotice('Chưa xác minh được quyền với VAWAY ID, vui lòng thử lại sau.');
+      setAuthState(info && info.required && !info.authenticated ? 'required' : 'ok');
     } catch (err) {
       console.error(err);
     }
-  };
+  }, []);
 
   useEffect(() => {
+    setAuthNotice(consumeAuthHash());
     checkAuth();
-  }, []);
+  }, [checkAuth]);
+
+  useEffect(() => {
+    if (authState === 'ok' && authInfo?.authenticated && authInfo.vaid) loadVaidLoader(authInfo.vaid.loaderUrl);
+  }, [authState, authInfo]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -90,7 +99,7 @@ export default function App() {
   }, [authState]);
 
   if (authState === 'checking') return null;
-  if (authState === 'required') return <LoginView onLoggedIn={() => setAuthState('ok')} />;
+  if (authState === 'required') return <LoginView auth={authInfo} notice={authNotice} onLoggedIn={checkAuth} />;
 
   return (
     <div className="min-h-screen bg-slate-50 font-roboto text-slate-900 flex flex-col">
@@ -98,6 +107,8 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={handleTabChange}
         state={overviewState}
+        userName={authInfo?.user?.name}
+        onLogout={authInfo?.required ? logout : undefined}
       />
 
       <PersistentRefLibraryBar

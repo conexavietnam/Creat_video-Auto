@@ -46,6 +46,10 @@ export function decryptCredential(payload: string): string {
   return Buffer.concat([decipher.update(Buffer.from(data, 'base64')), decipher.final()]).toString('utf8');
 }
 
+export function deriveSubkey(label: string): Buffer {
+  return Buffer.from(crypto.hkdfSync('sha256', key, Buffer.alloc(0), label, 32));
+}
+
 export function maskIdentifier(credential: string): string {
   const digest = crypto.createHash('sha256').update(credential).digest('hex');
   return `usr_***${digest.slice(0, 4)}`;

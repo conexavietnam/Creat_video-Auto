@@ -49,7 +49,12 @@ Health check chạy mỗi 60 giây cho mọi tài khoản enabled và ngay khi t
 
 ## 5. Bảo mật
 - Credential mã hóa AES-256-GCM, khóa từ `CREDENTIAL_KEY` (bắt buộc ở production; dev tự tạo `.data/credential.key`). API không bao giờ trả credential.
-- `APP_ACCESS_TOKEN` đặt thì mọi `/api` và `/media` yêu cầu cookie phiên.
+- Đăng nhập bằng **VAWAY ID** (id.vaway.vn), form nhúng `<vaway-login>` + bộ nạp SSO v3. Kit chép ở `src/server/vaid-kit/` (nguồn: `vaid-integration-kit-v2`, không sửa tay), logic ở `src/server/auth.ts`.
+- Phiên là cookie `muse_session` (HttpOnly, SameSite=Lax, Secure ở production) ký HMAC bằng khóa dẫn xuất từ `CREDENTIAL_KEY`, hạn 7 ngày; không lưu phiên ở DB nên sống qua restart. Mọi `/api` (trừ `/api/auth/*`) và `/media` đều qua `requireAuth`.
+- `LOGIN_MODE=admin` (mặc định): mỗi request kiểm lại quyền admin với id qua bộ nhớ đệm 60 giây; id lỗi thì từ chối (fail closed); gỡ admin ở id thì mất quyền sau tối đa 60 giây.
+- Production thiếu `VAID_APP_ID`/`VAID_APP_SECRET`/`VAID_PUBLIC_URL` (https) thì server từ chối khởi động. Không còn đăng nhập bằng mã truy cập.
+- Đăng xuất hai chiều: nút Đăng xuất xóa phiên rồi chuyển tới `id.vaway.vn/connect/vaidsignout`; id đăng xuất thì gọi `/api/auth/vaid/signout?local=1` để xóa phiên tại đây.
+- Endpoint: `POST /api/auth/vaid/code` (form nhúng), `GET /api/auth/vaid` (callback bộ nạp, một `access_verify` dùng một lần, 10 lần/phút/IP), `GET /api/auth/vaid/signout?local=1`, `POST /api/auth/logout`, `GET /api/auth/status`.
 - Server tự kiểm tra ảnh upload bằng magic bytes và dung lượng thực.
 
 ## 6. Định tuyến URL

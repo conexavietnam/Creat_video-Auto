@@ -1,14 +1,16 @@
 import React from 'react';
 import { OverviewState } from '../types';
-import { Layers, Workflow, Image as ImageIcon, Users, CheckSquare, Play, Clock, CheckCircle2, Wifi } from 'lucide-react';
+import { Layers, Workflow, Image as ImageIcon, Users, CheckSquare, Play, Clock, CheckCircle2, Wifi, LogOut } from 'lucide-react';
 
 interface HeaderProps {
   activeTab: 'batch' | 'studio' | 'library' | 'accounts' | 'progress';
   setActiveTab: (tab: 'batch' | 'studio' | 'library' | 'accounts' | 'progress') => void;
   state: OverviewState | null;
+  userName?: string;
+  onLogout?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, state }) => {
+export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, state, userName, onLogout }) => {
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16 gap-4">
@@ -114,6 +116,20 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, state }
             <span>Online: <strong className="tabular-nums font-bold">{state?.onlineAccounts || 0}/{state?.totalAccounts || 0}</strong></span>
           </div>
         </div>
+
+        {onLogout && (
+          <div className="flex items-center gap-2 shrink-0 text-xs font-roboto">
+            {userName && <span className="hidden md:inline text-slate-600 max-w-[140px] truncate">{userName}</span>}
+            <button
+              onClick={onLogout}
+              title="Đăng xuất khỏi VAWAY ID"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Đăng xuất</span>
+            </button>
+          </div>
+        )}
 
       </div>
     </header>

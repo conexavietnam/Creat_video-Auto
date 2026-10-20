@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 # Kiểm tra nhanh site đang chạy: bash smoke-test.sh [URL]
-# Có APP_ACCESS_TOKEN trong môi trường thì kiểm tra thêm phần sau đăng nhập.
-# Chỉ gửi request đọc, không tạo/xóa dữ liệu.
+# Đăng nhập bằng VAWAY ID (qua trình duyệt) nên script chỉ kiểm phần không cần đăng nhập.
+# Chỉ gửi request đọc (và một POST bị từ chối có chủ đích), không tạo/xóa dữ liệu.
 set -uo pipefail
 
 BASE="${1:-https://video.vaway.vn}"
 BASE="${BASE%/}"
 PASS=0
 FAIL=0
-JAR="$(mktemp)"
-trap 'rm -f "$JAR"' EXIT
 
 check() {
   if [ "$2" = "ok" ]; then
@@ -42,17 +40,25 @@ else
   check "API /api/auth/status trả JSON hợp lệ" bad "nhận: ${status:0:80}"
 fi
 
-REQUIRED=false
-echo "$status" | grep -q '"required":true' && REQUIRED=true
-if [ "$REQUIRED" = true ]; then
-  check "Workspace yêu cầu mã truy cập" ok
-  c="$(code "$BASE/api/accounts")"
-  [ "$c" = "401" ] && check "/api/accounts bị chặn khi chưa đăng nhập (401)" ok || check "/api/accounts bị chặn khi chưa đăng nhập (401)" bad "nhận $c"
-  c="$(code "$BASE/media/khong-co.mp4")"
-  [ "$c" = "401" ] && check "/media bị chặn khi chưa đăng nhập (401)" ok || check "/media bị chặn khi chưa đăng nhập (401)" bad "nhận $c"
-else
-  check "Workspace yêu cầu mã truy cập" bad "APP_ACCESS_TOKEN chưa được đặt, ai cũng vào được"
-fi
+echo "$status" | grep -q '"required":true' \
+  && check "Workspace yêu cầu đăng nhập" ok || check "Workspace yêu cầu đăng nhập" bad "required không phải true, ai cũng vào được"
+echo "$status" | grep -q '"vaid":{"appId":"[0-9]*","loaderUrl":"https://id.vaway.vn/libraries/v3/' \
+  && check "Đăng nhập VAWAY ID đã được cấu hình" ok || check "Đăng nhập VAWAY ID đã được cấu hình" bad "thiếu vaid.appId/loaderUrl: ${status:0:120}"
+echo "$status" | grep -q '"authenticated":false' \
+  && check "Khách chưa đăng nhập không được tính là đã đăng nhập" ok || check "Khách chưa đăng nhập không được tính là đã đăng nhập" bad "${status:0:120}"
+
+c="$(code "$BASE/api/accounts")"
+[ "$c" = "401" ] && check "/api/accounts bị chặn khi chưa đăng nhập (401)" ok || check "/api/accounts bị chặn khi chưa đăng nhập (401)" bad "nhận $c"
+c="$(code "$BASE/api/ref-images")"
+[ "$c" = "401" ] && check "/api/ref-images bị chặn khi chưa đăng nhập (401)" ok || check "/api/ref-images bị chặn khi chưa đăng nhập (401)" bad "nhận $c"
+c="$(code "$BASE/media/khong-co.mp4")"
+[ "$c" = "401" ] && check "/media bị chặn khi chưa đăng nhập (401)" ok || check "/media bị chặn khi chưa đăng nhập (401)" bad "nhận $c"
+
+c="$(code -X POST "$BASE/api/auth/vaid/code" -H 'Content-Type: application/json' -d '{"code":"x","state":"y"}')"
+[ "$c" = "403" ] && check "Endpoint đổi mã từ chối request không cùng nguồn (403)" ok || check "Endpoint đổi mã từ chối request không cùng nguồn (403)" bad "nhận $c"
+
+c="$(code "$BASE/api/auth/vaid?access_verify=khong-hop-le")"
+[ "$c" = "302" ] && check "Callback VAID từ chối mã sai (302 về trang chủ)" ok || check "Callback VAID từ chối mã sai (302 về trang chủ)" bad "nhận $c"
 
 case "$BASE" in
   https://*)
@@ -66,32 +72,7 @@ case "$BASE" in
     ;;
 esac
 
-if [ -n "${APP_ACCESS_TOKEN:-}" ]; then
-  login="$(curl -sS -m 20 -c "$JAR" -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d "{\"token\":\"$APP_ACCESS_TOKEN\"}" 2>/dev/null || true)"
-  if echo "$login" | grep -q '"success":true'; then
-    check "Đăng nhập bằng APP_ACCESS_TOKEN" ok
-
-    providers="$(body -b "$JAR" "$BASE/api/providers")"
-    echo "$providers" | grep -q '"id":"veo","label":"[^"]*","kind":"api_key","credentialHint":"[^"]*","available":true' \
-      && check "Provider Veo khả dụng" ok || check "Provider Veo khả dụng" bad "${providers:0:100}"
-    echo "$providers" | grep -q '"id":"kling","label":"[^"]*","kind":"api_key","credentialHint":"[^"]*","available":true' \
-      && check "Provider Kling khả dụng" ok || check "Provider Kling khả dụng" bad "${providers:0:100}"
-    echo "$providers" | grep -q '"id":"mock","label":"[^"]*","kind":"demo","credentialHint":"[^"]*","available":false' \
-      && check "Provider Mô phỏng đã tắt trên production" ok || check "Provider Mô phỏng đã tắt trên production" bad "nên đặt ENABLE_MOCK_PROVIDER=false"
-
-    state="$(body -b "$JAR" "$BASE/api/state")"
-    echo "$state" | grep -q '"counts"' && check "/api/state đọc được" ok || check "/api/state đọc được" bad "${state:0:100}"
-    echo "$state" | grep -q '"isDispatcherActive":true' && check "Dispatcher đang hoạt động" ok || check "Dispatcher đang hoạt động" bad "isDispatcherActive không phải true"
-
-    settings="$(body -b "$JAR" "$BASE/api/settings")"
-    echo "$settings" | grep -q '"concurrencyLimit"' && check "Cài đặt hệ thống đã được seed" ok || check "Cài đặt hệ thống đã được seed" bad "${settings:0:100}"
-  else
-    check "Đăng nhập bằng APP_ACCESS_TOKEN" bad "${login:0:80}"
-  fi
-else
-  echo "SKIP  Phần sau đăng nhập (đặt APP_ACCESS_TOKEN để kiểm tra thêm)"
-fi
-
+echo "SKIP  Phần sau đăng nhập: mở $BASE bằng trình duyệt, đăng nhập VAWAY ID rồi kiểm tay"
 echo
 echo "$PASS đạt, $FAIL lỗi"
 [ "$FAIL" -eq 0 ]

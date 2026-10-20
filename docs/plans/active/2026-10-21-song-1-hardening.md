@@ -27,8 +27,7 @@ Prompt dán cho agent:
 
 > Repo Creat_video-Auto. Đọc `docs/REVIEW_2026-10-21.md` mục C, E, H, I. **Chỉ sửa** `src/server/auth.ts`, `server.ts`, các component hiển thị kho ảnh/Studio, `src/api.ts`, và xóa `firebase-applet-config.json`. Không đụng `src/server/dispatcher.ts`, `src/server/providers/*`.
 >
-> 1. **Fail-closed:** khi `NODE_ENV=production` mà thiếu `APP_ACCESS_TOKEN` thì server từ chối khởi động (throw rõ ràng bằng tiếng Việt). Chỉ cho phép mở khi `NODE_ENV!=production`.
-> 2. **Chống dò mã:** giới hạn đăng nhập sai theo IP (ví dụ 5 lần/15 phút, trả 429 kèm thông báo tiếng Việt), tin `X-Forwarded-For` chỉ khi đứng sau nginx (đặt `app.set('trust proxy', 1)`). So sánh hằng thời gian như hiện tại. Đặt `express.json` giới hạn nhỏ (ví dụ 100kb) riêng cho `/api/auth/*`, giữ 50MB cho các route upload sau bước đăng nhập (đặt `requireAuth` trước `express.json` lớn).
+> 1. ~~Fail-closed và chống dò mã~~ **ĐÃ XONG 21/10** khi chuyển sang đăng nhập VAWAY ID (nhánh `feature/vaid-login`): production thiếu cấu hình VAID thì không khởi động, không còn mã truy cập để dò, `requireAuth` đã đứng trước `express.json` 50MB. **Không làm lại hai mục này**, và không đụng `src/server/auth.ts` ngoài việc cần thiết.
 > 3. **Kho ảnh nhẹ:** `GET /api/ref-images` không trả `dataUrl` nữa, chỉ trả `id, tag, filename, mimeType, fileSize, createdAt` và một `thumbUrl`. Thêm `GET /api/ref-images/:tag/image` (sau đăng nhập) trả file ảnh với `Content-Type` đúng và `Cache-Control: private, max-age=3600`. Sửa frontend dùng URL này; đảm bảo dropdown `@`, Studio "chọn từ kho" vẫn chạy. Không đổi cách lưu trong DB ở task này.
 > 4. **Chống bấm đúp Studio:** `POST /api/studio/generate-all` chuyển thẻ `idle|failed` sang `generating` bằng một câu `UPDATE ... RETURNING` nguyên tử trước khi tạo job, để hai request đồng thời không tạo trùng job cho cùng thẻ.
 > 5. Xóa `firebase-applet-config.json` nếu không có import nào dùng (kiểm tra bằng grep).

@@ -22,9 +22,9 @@ Copy thư mục `deploy/` lên VPS rồi:
 sudo bash bootstrap-root.sh "$(cat deploy_key.pub)"
 # tuỳ chọn: APP_PORT=3101 CERTBOT_EMAIL=you@mail.com sudo -E bash bootstrap-root.sh "..."
 ```
-Script (chạy lại nhiều lần vẫn an toàn) sẽ: cài nginx/Postgres/Node 22/ffmpeg/certbot nếu thiếu, tạo user không sudo, bật `linger` cho systemd --user, tạo database + role riêng, sinh `app.env` (mật khẩu DB, `CREDENTIAL_KEY`, `APP_ACCESS_TOKEN`), tạo vhost nginx và cấp SSL.
+Script (chạy lại nhiều lần vẫn an toàn) sẽ: cài nginx/Postgres/Node 22/ffmpeg/certbot nếu thiếu, tạo user không sudo, bật `linger` cho systemd --user, tạo database + role riêng, sinh `app.env` (mật khẩu DB, `CREDENTIAL_KEY`, `LOGIN_MODE`, `VAID_PUBLIC_URL`), tạo vhost nginx và cấp SSL.
 
-Xem mã đăng nhập web: `sudo grep APP_ACCESS_TOKEN /home/video.vaway.vn/app.env`.
+Đăng nhập dùng **VAWAY ID** (id.vaway.vn): thêm `VAID_APP_ID` và `VAID_APP_SECRET` của app vào `app.env` trước khi deploy, thiếu thì ứng dụng từ chối khởi động. Chế độ `LOGIN_MODE=admin`: chỉ quản trị viên của app (do id giữ) vào được.
 
 **Sao lưu `CREDENTIAL_KEY` ở nơi an toàn.** Mất khóa này thì mọi credential tài khoản đã lưu không giải mã được nữa.
 
@@ -47,7 +47,6 @@ Repo → Settings → Secrets and variables → Actions:
 ## Kiểm tra nhanh sau deploy
 ```bash
 bash deploy/smoke-test.sh https://video.vaway.vn
-APP_ACCESS_TOKEN=<mã> bash deploy/smoke-test.sh https://video.vaway.vn   # kiểm tra thêm phần sau đăng nhập
 ```
 Chỉ gửi request đọc, không tạo hay xóa dữ liệu. Trả mã thoát khác 0 nếu có mục lỗi.
 

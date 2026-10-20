@@ -96,7 +96,9 @@ SQL_USER=${DB_USER}
 SQL_PASSWORD=${DB_PASSWORD}
 SQL_DB_NAME=${DB_NAME}
 CREDENTIAL_KEY=$(openssl rand -hex 32)
-APP_ACCESS_TOKEN=$(openssl rand -hex 16)
+LOGIN_MODE=admin
+VAID_PUBLIC_URL=https://${APP_DOMAIN}
+# VAID_APP_ID và VAID_APP_SECRET: lấy từ app đã tạo ở id.vaway.vn, thêm tay vào file này trước khi deploy
 ENABLE_MOCK_PROVIDER=false
 ENVEOF
   chown "$APP_USER:$APP_USER" "$ENV_FILE"
@@ -128,6 +130,6 @@ echo
 echo "Hoàn tất bootstrap."
 echo "User: ${APP_USER} (không có sudo) | Cổng nội bộ: ${APP_PORT} | DB: ${DB_NAME}"
 if [ "$GENERATED_ENV" = "1" ]; then
-  echo "Mã đăng nhập web (APP_ACCESS_TOKEN) nằm trong ${ENV_FILE}. Xem bằng: grep APP_ACCESS_TOKEN ${ENV_FILE}"
+  echo "Thêm VAID_APP_ID và VAID_APP_SECRET (app của id.vaway.vn) vào ${ENV_FILE} trước khi deploy, thiếu thì ứng dụng từ chối khởi động."
 fi
 echo "Tiếp theo: thêm GitHub Secrets rồi chạy workflow Deploy."
